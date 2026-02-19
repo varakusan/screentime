@@ -1,9 +1,13 @@
 package com.example.helloworld
 
+import android.app.ActivityManager
+import android.app.AppOpsManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -57,6 +62,11 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.*
@@ -64,6 +74,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,6 +118,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Batch permission launcher — handles notifications + microphone in one flow
+    private val runtimePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        // Log results for debugging
+        grants.forEach { (perm, granted) ->
+            android.util.Log.d("MainActivity", "Permission $perm granted=$granted")
+        }
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         SettingsState.update { it.copy(isDocked = true) }
@@ -118,9 +141,30 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Request notification permission on API 33+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 100)
+        // Request all runtime permissions in a single batch
+        val permissionsToRequest = mutableListOf<String>()
+
+        // Notification permission (API 33+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        // Camera permission for face tracking
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(android.Manifest.permission.CAMERA)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            runtimePermissionLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+
+        // Initialize state based on saved settings
+        ScreenTimeManager(this).loadInitialState()
+
+        // Initialize state based on running service
+        if (isServiceRunning(OverlayService::class.java)) {
+            SettingsState.update { it.copy(overlayEnabled = true) }
         }
 
         setContent {
@@ -160,9 +204,42 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    internal fun checkUsageStatsPermission(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+        } else {
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), packageName)
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    internal fun requestUsageStatsPermission() {
+        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        // If the above doesn't work (some OEMs), just open general settings
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
+    }
+
     private fun stopOverlayService() {
         SettingsState.update { it.copy(overlayEnabled = false) }
         stopService(Intent(this, OverlayService::class.java))
+    }
+
+    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        @Suppress("DEPRECATION")
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 }
 
@@ -177,8 +254,27 @@ fun SettingsScreen(
     onOverlayToggle: (Boolean) -> Unit
 ) {
     val settings by vm.settings.collectAsState()
+    val focusManager = LocalFocusManager.current
     var showColorPicker by remember { mutableStateOf(false) }
     var showShapePicker by remember { mutableStateOf(false) }
+
+    // Local states for target inputs to ensure smooth typing and sync
+    var hoursInput by remember { mutableStateOf(TextFieldValue(settings.targetTimeHours.toString())) }
+    var minutesInput by remember { mutableStateOf(TextFieldValue(settings.targetTimeMinutes.toString())) }
+    var isHoursFocused by remember { mutableStateOf(false) }
+    var isMinutesFocused by remember { mutableStateOf(false) }
+
+    // Sync from settings (e.g. slider) back to text fields only when NOT focused
+    LaunchedEffect(settings.targetTimeHours, isHoursFocused) {
+        if (!isHoursFocused && settings.targetTimeHours.toString() != hoursInput.text) {
+            hoursInput = TextFieldValue(settings.targetTimeHours.toString())
+        }
+    }
+    LaunchedEffect(settings.targetTimeMinutes, isMinutesFocused) {
+        if (!isMinutesFocused && settings.targetTimeMinutes.toString() != minutesInput.text) {
+            minutesInput = TextFieldValue(settings.targetTimeMinutes.toString())
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -251,35 +347,239 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // 5. DISTANCE METRIC (0-100 cm)
+                    // Get activity context for all items below
+                    val activity = LocalContext.current as MainActivity
+
+                    // 5. DISTANCE TARGET (0-100 cm)
                     SettingsSliderRow(
                         icon = Icons.Filled.Straighten,
-                        label = "Distance (cm)",
-                        value = settings.distanceCm / 100f,
+                        label = "Distance Target (cm)",
+                        value = settings.distanceTargetCm / 100f,
                         accentColor = AccentPurple,
-                        onValueChange = { vm.setDistance((it * 100).toInt()) }
+                        onValueChange = { vm.setDistanceTarget((it * 100).toInt(), activity) }
                     )
 
                     GlassDivider()
 
-                    // 6 & 7: TIME
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingsSliderRow(
-                                icon = Icons.Filled.AccessTime,
-                                label = "Hours",
-                                value = settings.timeHours / 23f,
-                                accentColor = AccentYellow,
-                                onValueChange = { vm.setTimeHours((it * 23).toInt()) }
+                    // 6 & 7: ACTIVE SCREEN TIME STATUS
+                    val hasUsagePermission = activity.checkUsageStatsPermission()
+
+                    // Calculate progress toward target
+                    val targetTotalSeconds = (settings.targetTimeHours * 3600L) + (settings.targetTimeMinutes * 60L)
+                    val progress = if (targetTotalSeconds > 0) {
+                        (settings.accumulatedSeconds.toFloat() / targetTotalSeconds).coerceIn(0f, 1f)
+                    } else 0f
+                    // Color transitions: green → yellow → red as progress goes 0 → 0.7 → 1.0
+                    val screenTimeColor = when {
+                        progress < 0.5f -> AccentGreen
+                        progress < 0.7f -> Color(0xFFFFEB3B) // yellow
+                        progress < 0.85f -> Color(0xFFFF9800) // orange
+                        else -> Color(0xFFFF1744) // bright red
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.AccessTime,
+                            null,
+                            tint = if (hasUsagePermission) screenTimeColor else AccentPink,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Active Screen Time",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (hasUsagePermission) "Tracking active" else "Usage access required",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 11.sp
                             )
                         }
-                        Box(modifier = Modifier.weight(1f)) {
-                            SettingsSliderRow(
-                                icon = Icons.Filled.AccessTime,
-                                label = "Minutes",
-                                value = settings.timeMinutes / 59f,
-                                accentColor = AccentPink,
-                                onValueChange = { vm.setTimeMinutes((it * 59).toInt()) }
+                        if (!hasUsagePermission) {
+                            Text(
+                                "Grant",
+                                color = AccentPink,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .clickable { activity.requestUsageStatsPermission() }
+                                    .padding(8.dp)
+                            )
+                        } else {
+                            val hours = settings.accumulatedSeconds / 3600
+                            val minutes = (settings.accumulatedSeconds % 3600) / 60
+                            Text(
+                                String.format("%02dh %02dm", hours, minutes),
+                                color = screenTimeColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    // TARGET TIME SLIDERS
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Timer,
+                            null,
+                            tint = AccentYellow,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            "Target: ${String.format("%02d", settings.targetTimeHours)}h ${String.format("%02d", settings.targetTimeMinutes)}m",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.width(100.dp)
+                        )
+                        // Hours slider
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Hours", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                // Manual Input
+                                Box(
+                                    modifier = Modifier
+                                        .width(45.dp)
+                                        .height(26.dp)
+                                        .background(Color.White.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                                        .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = hoursInput,
+                                        onValueChange = { newVal ->
+                                            val s = newVal.text
+                                            if (s.isEmpty()) {
+                                                hoursInput = newVal
+                                                vm.setTargetTimeHours(0, activity)
+                                            } else {
+                                                val num = s.toIntOrNull()
+                                                if (num != null) {
+                                                    val capped = num.coerceIn(0, 23)
+                                                    // If we capped it, we update the local text to show the cap
+                                                    if (capped != num) {
+                                                        hoursInput = TextFieldValue(capped.toString(), selection = newVal.selection)
+                                                    } else {
+                                                        hoursInput = newVal
+                                                    }
+                                                    vm.setTargetTimeHours(capped, activity)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.onFocusChanged { 
+                                            isHoursFocused = it.isFocused 
+                                            if (it.isFocused) {
+                                                hoursInput = TextFieldValue("")
+                                            }
+                                        },
+                                        textStyle = TextStyle(
+                                            color = AccentYellow,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        ),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Number,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        keyboardActions = KeyboardActions(
+                                            onDone = { focusManager.clearFocus() }
+                                        ),
+                                        singleLine = true,
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentYellow)
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = settings.targetTimeHours / 23f,
+                                onValueChange = { vm.setTargetTimeHours((it * 23).toInt(), activity) },
+                                modifier = Modifier.height(24.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = AccentYellow,
+                                    activeTrackColor = AccentYellow
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        // Minutes slider
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Min", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                // Manual Input
+                                Box(
+                                    modifier = Modifier
+                                        .width(45.dp)
+                                        .height(26.dp)
+                                        .background(Color.White.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                                        .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = minutesInput,
+                                        onValueChange = { newVal ->
+                                            val s = newVal.text
+                                            if (s.isEmpty()) {
+                                                minutesInput = newVal
+                                                vm.setTargetTimeMinutes(0, activity)
+                                            } else {
+                                                val num = s.toIntOrNull()
+                                                if (num != null) {
+                                                    val capped = num.coerceIn(0, 59)
+                                                    if (capped != num) {
+                                                        minutesInput = TextFieldValue(capped.toString(), selection = newVal.selection)
+                                                    } else {
+                                                        minutesInput = newVal
+                                                    }
+                                                    vm.setTargetTimeMinutes(capped, activity)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.onFocusChanged { 
+                                            isMinutesFocused = it.isFocused 
+                                            if (it.isFocused) {
+                                                minutesInput = TextFieldValue("")
+                                            }
+                                        },
+                                        textStyle = TextStyle(
+                                            color = AccentYellow,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        ),
+                                        keyboardOptions = KeyboardOptions(
+                                            keyboardType = KeyboardType.Number,
+                                            imeAction = ImeAction.Done
+                                        ),
+                                        keyboardActions = KeyboardActions(
+                                            onDone = { focusManager.clearFocus() }
+                                        ),
+                                        singleLine = true,
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentYellow)
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = settings.targetTimeMinutes / 59f,
+                                onValueChange = { vm.setTargetTimeMinutes((it * 59).toInt(), activity) },
+                                modifier = Modifier.height(24.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = AccentYellow,
+                                    activeTrackColor = AccentYellow
+                                )
                             )
                         }
                     }
@@ -621,8 +921,6 @@ fun ShapeSelectionDialog(
                                     when (shape) {
                                         SettingsState.WindowShape.Rectangle -> drawRect(color)
                                         SettingsState.WindowShape.Rounded -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
-                                        SettingsState.WindowShape.Pill -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(100f))
-                                        SettingsState.WindowShape.Circle -> drawCircle(color)
                                     }
                                 }
                             }

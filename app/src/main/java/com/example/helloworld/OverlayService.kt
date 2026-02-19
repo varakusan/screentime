@@ -5,12 +5,15 @@ import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.IBinder
 import android.util.TypedValue
@@ -21,13 +24,13 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.lifecycle.LifecycleService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-
-class OverlayService : Service() {
+class OverlayService : LifecycleService() {
 
     companion object {
         private const val CHANNEL_ID = "overlay_channel"
@@ -38,6 +41,27 @@ class OverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
+    // Screen Time
+    private lateinit var screenTimeManager: ScreenTimeManager
+    // Distance Tracker
+    private lateinit var faceDistanceTracker: FaceDistanceTracker
+    private var isScreenOn = true
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                Intent.ACTION_SCREEN_ON -> {
+                    isScreenOn = true
+                    screenTimeManager.startTracking()
+                    faceDistanceTracker.start()
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    isScreenOn = false
+                    screenTimeManager.stopTracking()
+                    faceDistanceTracker.stop()
+                }
+            }
+        }
+    }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var statusDot: View? = null
@@ -49,9 +73,13 @@ class OverlayService : Service() {
     private var savedY = 0
     private var wasDocked = false
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent): IBinder? {
+        super.onBind(intent)
+        return null
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
         // START_STICKY ensures the service restarts if killed by the system,
         // keeping the overlay alive even after the app is closed.
         return START_STICKY
@@ -60,13 +88,64 @@ class OverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        screenTimeManager = ScreenTimeManager(this)
+        faceDistanceTracker = FaceDistanceTracker(this, this)
+        SettingsState.update { it.copy(overlayEnabled = true) }
+        
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val serviceType = if (Build.VERSION.SDK_INT >= 34) {
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            } else {
+                0
+            }
+            startForeground(NOTIFICATION_ID, buildNotification(), serviceType)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
         createOverlayView()
         observeSettings()
+        
+        // Initial screen state
+        try {
+            val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            val displays = dm.displays
+            if (displays.isNotEmpty()) {
+                isScreenOn = displays[0].state == android.view.Display.STATE_ON
+            }
+        } catch (_: Exception) {
+            isScreenOn = true
+        }
+        if (isScreenOn) {
+            screenTimeManager.startTracking()
+            faceDistanceTracker.start()
+        }
+
+        // Register screen events
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenReceiver, filter)
+        }
+
+        try {
+            MidnightResetReceiver.scheduleMidnightReset(this)
+        } catch (_: Exception) {
+            // AlarmManager exact alarm may not be available on API 31+ without permission
+        }
     }
 
     override fun onDestroy() {
+        try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+        SettingsState.update { it.copy(overlayEnabled = false) }
+        screenTimeManager.stopTracking()
+        faceDistanceTracker.stop()
         dotAnimator?.cancel()
         overlayView?.let {
             try { windowManager.removeView(it) } catch (_: Exception) {}
@@ -220,14 +299,6 @@ class OverlayService : Service() {
                         bg?.shape = GradientDrawable.RECTANGLE
                         bg?.cornerRadius = dpToPx(16).toFloat()
                     }
-                    SettingsState.WindowShape.Pill -> {
-                        bg?.shape = GradientDrawable.RECTANGLE
-                        bg?.cornerRadius = dpToPx(100).toFloat()
-                    }
-                    SettingsState.WindowShape.Circle -> {
-                        bg?.shape = GradientDrawable.OVAL
-                        bg?.cornerRadius = 0f
-                    }
                 }
 
                 // 2. Size — both wrap content to fit text
@@ -248,7 +319,7 @@ class OverlayService : Service() {
                         // Restoring position
                         layoutParams?.x = savedX
                         layoutParams?.y = savedY
-                        layoutParams?.gravity = Gravity.TOP or Gravity.START // reset gravity if needed, but existing is TOP|CENTER_HORIZONTAL. 
+                        layoutParams?.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                         // Wait, onCreate sets TOP|CENTER. If user drags, x/y are offsets from that.
                         // If I change gravity, coordinates might mean different things.
                         // The DragListener updates x/y based on raw movement.
@@ -264,11 +335,58 @@ class OverlayService : Service() {
                 // Update background tint + transparency
                 bg?.setColor(tintColorFromHue(s.windowTintHue, s.windowTransparency))
 
-                // Update font and text
+                // Update font and text with progressive color
                 feedLabel?.let { label ->
                     label.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
-                    label.setTextColor(colorToInt(s.fontColor))
-                    label.text = "D: ${s.distanceCm}cm | T: ${String.format("%02d:%02d", s.timeHours, s.timeMinutes)}"
+                    
+                    val hours = s.accumulatedSeconds / 3600
+                    val minutes = (s.accumulatedSeconds % 3600) / 60
+
+                    // Distance part: always show live distance
+                    val distanceText = if (s.liveDistanceCm >= 0) {
+                        String.format("%.0f", s.liveDistanceCm)
+                    } else {
+                        "--"  // unavailable
+                    }
+                    val distancePart = "D: ${distanceText}cm | "
+                    val timePart = "T: ${String.format("%02d:%02d", hours, minutes)}"
+                    val fullText = distancePart + timePart
+
+                    // Calculate progress toward target
+                    val targetTotalSeconds = (s.targetTimeHours * 3600L) + (s.targetTimeMinutes * 60L)
+                    val progress = if (targetTotalSeconds > 0) {
+                        (s.accumulatedSeconds.toFloat() / targetTotalSeconds).coerceIn(0f, 1f)
+                    } else 0f
+
+                    // Color for T: transitions from font color → yellow → orange → bright red
+                    val timeColor = when {
+                        progress < 0.5f -> colorToInt(s.fontColor)
+                        progress < 0.7f -> Color.rgb(255, 235, 59)   // yellow
+                        progress < 0.85f -> Color.rgb(255, 152, 0)   // orange
+                        else -> Color.rgb(255, 23, 68)               // bright red
+                    }
+
+                    // Color for D: turns red when within target distance (too close!)
+                    val distanceColor = if (s.liveDistanceCm >= 0 && s.liveDistanceCm <= s.distanceTargetCm) {
+                        Color.rgb(255, 23, 68) // bright red — too close to screen!
+                    } else {
+                        colorToInt(s.fontColor) // normal color
+                    }
+
+                    val spannable = android.text.SpannableString(fullText)
+                    // Distance part: normal or red color
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(distanceColor),
+                        0, distancePart.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    // Time part: progressive color
+                    spannable.setSpan(
+                        android.text.style.ForegroundColorSpan(timeColor),
+                        distancePart.length, fullText.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                    label.text = spannable
                 }
                 
                 statusDot?.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE

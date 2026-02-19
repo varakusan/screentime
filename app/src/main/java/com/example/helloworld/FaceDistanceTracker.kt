@@ -6,13 +6,15 @@ import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
+import com.google.mlkit.vision.face.FaceLandmark
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.pow
@@ -20,14 +22,23 @@ import kotlin.math.sqrt
 
 /**
  * Camera-based Face Distance Tracker using ML Kit.
- * Estimates distance based on the pixel distance between eye landmarks.
+ * Uses a SELF-MANAGED LifecycleOwner so CameraX stays bound to THIS class
+ * rather than the service or activity. This means the camera keeps running
+ * even when the main app is closed, as long as the OverlayService is alive.
  */
-class FaceDistanceTracker(private val context: Context, private val lifecycleOwner: LifecycleOwner) {
+class FaceDistanceTracker(private val context: Context) {
+
+    // ── Self-managed lifecycle ────────────────────────────────────
+    // We do NOT rely on the service's LifecycleOwner so the camera
+    // cannot be accidentally stopped by activity destruction.
+    private val cameraLifecycleOwner = object : LifecycleOwner {
+        val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle get() = registry
+    }
 
     private var cameraProvider: ProcessCameraProvider? = null
-    private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-    
-    // ML Kit Face Detector
+    private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
     private val detector = FaceDetection.getClient(
         FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -35,35 +46,92 @@ class FaceDistanceTracker(private val context: Context, private val lifecycleOwn
             .build()
     )
 
-    // Average Interpupillary Distance (IPD) in cm
     private val AVG_IPD_CM = 6.3f
-    
-    // Calibration constant (focal length * physical_dist / pixel_dist)
-    // This varies by camera, but ~500f-600f is common for android front cams at 640x480
-    private var focalLengthEquivalent = 550f 
+    private val focalLengthEquivalent = 550f
 
-    // Last update time for throttling
     private var lastUpdateTime = 0L
-    private val UPDATE_INTERVAL_MS = 2000L // 2 seconds
+    private val UPDATE_INTERVAL_MS = 2000L
+
+    private var isRunning = false
+
+    // ── Public API ────────────────────────────────────────────────
 
     fun start() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            cameraProvider = cameraProviderFuture.get()
-            bindAnalysis()
-            SettingsState.update { it.copy(trackerActive = true) }
-        }, ContextCompat.getMainExecutor(context))
-        
-        Log.i("FaceDistanceTracker", "Starting tracker...")
+        if (isRunning) {
+            Log.i(TAG, "Already running, skipping start.")
+            return
+        }
+
+        // Ensure executor is alive
+        if (cameraExecutor.isShutdown) {
+            cameraExecutor = Executors.newSingleThreadExecutor()
+        }
+
+        // Move our lifecycle to STARTED — CameraX will bind to this
+        ContextCompat.getMainExecutor(context).execute {
+            try {
+                if (cameraLifecycleOwner.registry.currentState == Lifecycle.State.DESTROYED) {
+                    // Cannot restart a destroyed lifecycle; app needs to be restarted
+                    Log.w(TAG, "Lifecycle already destroyed, cannot restart.")
+                    return@execute
+                }
+                cameraLifecycleOwner.registry.currentState = Lifecycle.State.STARTED
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not set lifecycle to STARTED", e)
+                return@execute
+            }
+
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                try {
+                    cameraProvider = cameraProviderFuture.get()
+                    bindAnalysis()
+                    isRunning = true
+                    SettingsState.update { it.copy(trackerActive = true) }
+                    Log.i(TAG, "Camera bound successfully.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Camera initialization failed", e)
+                    SettingsState.update { it.copy(trackerActive = false) }
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
     }
 
+    /** Pauses tracking (e.g., screen off). Camera stays bound so restart is instant. */
     fun stop() {
-        cameraProvider?.unbindAll()
-        cameraExecutor.shutdown()
-        detector.close()
+        try {
+            cameraProvider?.unbindAll()
+        } catch (e: Exception) {
+            Log.w(TAG, "Unbind error: ${e.message}")
+        }
+        isRunning = false
         SettingsState.update { it.copy(trackerActive = false, liveDistanceCm = -1f) }
-        Log.i("FaceDistanceTracker", "Tracker stopped.")
+        Log.i(TAG, "Tracker paused (camera unbound).")
     }
+
+    /** Full cleanup — call ONLY from OverlayService.onDestroy(). */
+    fun destroy() {
+        try {
+            cameraProvider?.unbindAll()
+        } catch (e: Exception) {
+            Log.w(TAG, "Unbind on destroy: ${e.message}")
+        }
+        try {
+            // Destroy our self-managed lifecycle so CameraX fully releases resources
+            ContextCompat.getMainExecutor(context).execute {
+                try {
+                    cameraLifecycleOwner.registry.currentState = Lifecycle.State.DESTROYED
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        isRunning = false
+        if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
+        try { detector.close() } catch (_: Exception) {}
+        SettingsState.update { it.copy(trackerActive = false, liveDistanceCm = -1f) }
+        Log.i(TAG, "Tracker destroyed.")
+    }
+
+    // ── Private ───────────────────────────────────────────────────
 
     @SuppressLint("UnsafeOptInUsageError")
     private fun bindAnalysis() {
@@ -73,10 +141,8 @@ class FaceDistanceTracker(private val context: Context, private val lifecycleOwn
             .build()
 
         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-            val currentTime = System.currentTimeMillis()
-            
-            // Throttle: Only process if interval has passed
-            if (currentTime - lastUpdateTime < UPDATE_INTERVAL_MS) {
+            val now = System.currentTimeMillis()
+            if (now - lastUpdateTime < UPDATE_INTERVAL_MS) {
                 imageProxy.close()
                 return@setAnalyzer
             }
@@ -86,48 +152,42 @@ class FaceDistanceTracker(private val context: Context, private val lifecycleOwn
                 val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
                 detector.process(image)
                     .addOnSuccessListener { faces ->
-                        lastUpdateTime = System.currentTimeMillis() // Update time only on success/attempt
-
+                        lastUpdateTime = System.currentTimeMillis()
                         if (faces.isNotEmpty()) {
                             val face = faces[0]
-                            val leftEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.LEFT_EYE)
-                            val rightEye = face.getLandmark(com.google.mlkit.vision.face.FaceLandmark.RIGHT_EYE)
-
+                            val leftEye  = face.getLandmark(FaceLandmark.LEFT_EYE)
+                            val rightEye = face.getLandmark(FaceLandmark.RIGHT_EYE)
                             if (leftEye != null && rightEye != null) {
                                 val p1 = leftEye.position
                                 val p2 = rightEye.position
                                 val pixelDist = sqrt((p1.x - p2.x).pow(2) + (p1.y - p2.y).pow(2))
-                                
-                                // Distance = (FocalLength * ActualIPD) / PixelIPD
-                                val estimatedDistCm = (focalLengthEquivalent * AVG_IPD_CM) / pixelDist
-                                
-                                // Smooth update: update directly
-                                SettingsState.update { it.copy(liveDistanceCm = estimatedDistCm) }
+                                val distCm = (focalLengthEquivalent * AVG_IPD_CM) / pixelDist
+                                SettingsState.update { it.copy(liveDistanceCm = distCm) }
                             }
                         } else {
-                            // No face detected - don't reset immediately to avoid flickering
-                            // Only reset if we fail detection multiple times or similar, 
-                            // but for 10s interval, let's keep the last value or set to -1.
-                            // User asked to "keep the value consistent". 
-                            // If we set -1 here, the overlay shows "--". 
-                            // Let's set -1 only if we REALLY lose the face.
                             SettingsState.update { it.copy(liveDistanceCm = -1f) }
                         }
                     }
-                    .addOnCompleteListener {
-                        imageProxy.close()
-                    }
+                    .addOnCompleteListener { imageProxy.close() }
             } else {
                 imageProxy.close()
             }
         }
 
-        val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-
         try {
-            cameraProvider?.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
-        } catch (exc: Exception) {
-            Log.e("FaceDistanceTracker", "Use case binding failed", exc)
+            cameraProvider?.unbindAll()
+            cameraProvider?.bindToLifecycle(
+                cameraLifecycleOwner,          // ← our self-managed lifecycle
+                CameraSelector.DEFAULT_FRONT_CAMERA,
+                imageAnalysis
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Use case binding failed", e)
+            isRunning = false
         }
+    }
+
+    companion object {
+        private const val TAG = "FaceDistanceTracker"
     }
 }

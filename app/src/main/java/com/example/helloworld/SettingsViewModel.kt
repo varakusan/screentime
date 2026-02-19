@@ -21,16 +21,21 @@ class SettingsViewModel : ViewModel() {
     }
 
 
-    fun setWindowTransparency(alpha: Float) {
-        SettingsState.update { it.copy(windowTransparency = alpha.coerceIn(0f, 1f)) }
+    fun setWindowTransparency(alpha: Float, context: android.content.Context) {
+        val a = alpha.coerceIn(0f, 1f)
+        SettingsState.update { it.copy(windowTransparency = a) }
+        ScreenTimeManager(context).saveWindowTransparency(a)
     }
 
-    fun setWindowTintHue(hue: Float) {
-        SettingsState.update { it.copy(windowTintHue = hue.coerceIn(0f, 360f)) }
+    fun setWindowTintHue(hue: Float, context: android.content.Context) {
+        val h = hue.coerceIn(0f, 360f)
+        SettingsState.update { it.copy(windowTintHue = h) }
+        ScreenTimeManager(context).saveWindowTintHue(h)
     }
 
-    fun setFontColor(color: Color) {
+    fun setFontColor(color: Color, context: android.content.Context) {
         SettingsState.update { it.copy(fontColor = color) }
+        ScreenTimeManager(context).saveFontColor(color)
     }
 
     fun updateCustomColors(colors: List<Color>) {
@@ -41,8 +46,9 @@ class SettingsViewModel : ViewModel() {
         SettingsState.update { it.copy(accumulatedSeconds = seconds) }
     }
 
-    fun setWindowShape(shape: SettingsState.WindowShape) {
+    fun setWindowShape(shape: SettingsState.WindowShape, context: android.content.Context) {
         SettingsState.update { it.copy(windowShape = shape) }
+        ScreenTimeManager(context).saveWindowShape(shape)
     }
 
     fun setDocked(docked: Boolean) {

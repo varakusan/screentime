@@ -257,6 +257,7 @@ fun SettingsScreen(
     val focusManager = LocalFocusManager.current
     var showColorPicker by remember { mutableStateOf(false) }
     var showShapePicker by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as MainActivity
 
     // Local states for target inputs to ensure smooth typing and sync
     var hoursInput by remember { mutableStateOf(TextFieldValue(settings.targetTimeHours.toString())) }
@@ -331,7 +332,7 @@ fun SettingsScreen(
                         label = "Transparency",
                         value = 1f - settings.windowTransparency,
                         accentColor = AccentCyan,
-                        onValueChange = { vm.setWindowTransparency(1f - it) }
+                        onValueChange = { vm.setWindowTransparency(1f - it, activity) }
                     )
 
                     GlassDivider()
@@ -342,13 +343,10 @@ fun SettingsScreen(
                         label = "Window Tint",
                         value = settings.windowTintHue / 360f,
                         accentColor = AccentYellow,
-                        onValueChange = { vm.setWindowTintHue(it * 360f) }
+                        onValueChange = { vm.setWindowTintHue(it * 360f, activity) }
                     )
 
                     GlassDivider()
-
-                    // Get activity context for all items below
-                    val activity = LocalContext.current as MainActivity
 
                     // 5. DISTANCE TARGET (0-100 cm)
                     SettingsSliderRow(
@@ -633,15 +631,15 @@ fun SettingsScreen(
             val initialColor = remember { settings.fontColor }
             EditColorsDialog(
                 initialColor = initialColor,
-                onColorChange = { vm.setFontColor(it) },
+                onColorChange = { vm.setFontColor(it, activity) },
                 onColorSelected = { 
-                    vm.setFontColor(it)
+                    vm.setFontColor(it, activity)
                     val newCustom = (listOf(it) + settings.customColors).distinct().take(14)
                     vm.updateCustomColors(newCustom)
                     showColorPicker = false 
                 },
                 onDismiss = { 
-                    vm.setFontColor(initialColor)
+                    vm.setFontColor(initialColor, activity)
                     showColorPicker = false 
                 }
             )
@@ -651,7 +649,7 @@ fun SettingsScreen(
             ShapeSelectionDialog(
                 initialShape = settings.windowShape,
                 onShapeSelected = { 
-                    vm.setWindowShape(it)
+                    vm.setWindowShape(it, activity)
                     showShapePicker = false 
                 },
                 onDismiss = { showShapePicker = false }

@@ -89,7 +89,8 @@ class OverlayService : LifecycleService() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         screenTimeManager = ScreenTimeManager(this)
-        faceDistanceTracker = FaceDistanceTracker(this, this)
+        screenTimeManager.loadInitialState(force = true)
+        faceDistanceTracker = FaceDistanceTracker(this)
         SettingsState.update { it.copy(overlayEnabled = true) }
         
         createNotificationChannel()
@@ -145,7 +146,7 @@ class OverlayService : LifecycleService() {
         try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
         SettingsState.update { it.copy(overlayEnabled = false) }
         screenTimeManager.stopTracking()
-        faceDistanceTracker.stop()
+        faceDistanceTracker.destroy()
         dotAnimator?.cancel()
         overlayView?.let {
             try { windowManager.removeView(it) } catch (_: Exception) {}
@@ -161,7 +162,7 @@ class OverlayService : LifecycleService() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.overlay_channel_name),
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply { description = "Overlay service notification" }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
@@ -176,7 +177,7 @@ class OverlayService : LifecycleService() {
 
         return builder
             .setContentTitle(getString(R.string.overlay_notification_title))
-            .setContentText(getString(R.string.overlay_notification_text))
+            .setContentText("Tracking is active in the background.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
     }
@@ -261,7 +262,14 @@ class OverlayService : LifecycleService() {
         container.setOnTouchListener(DragTouchListener(params, windowManager, this))
 
         overlayView = container
-        windowManager.addView(container, params)
+        try {
+            windowManager.addView(container, params)
+        } catch (e: Exception) {
+            // This can happen if permission is revoked or context is invalid during restart
+            SettingsState.update { it.copy(overlayEnabled = false) }
+            stopSelf()
+            return
+        }
 
         // Start pulsing animation
         startPulse()

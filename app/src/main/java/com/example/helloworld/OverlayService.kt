@@ -32,10 +32,6 @@ class OverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "overlay_channel"
         private const val NOTIFICATION_ID = 1001
-        private const val MIN_OVERLAY_WIDTH_DP = 80 // Reduced
-        private const val MAX_OVERLAY_WIDTH_DP = 150 // Reduced significantly (approx 10-15% screen width)
-        private const val MIN_OVERLAY_HEIGHT_DP = 40
-        private const val MAX_OVERLAY_HEIGHT_DP = 100
     }
 
 
@@ -149,8 +145,8 @@ class OverlayService : Service() {
 
         // Label — single line, no wrapping
         val label = TextView(this).apply {
-            text = "Live Feed: Online"
-            setTextColor(colorToInt(settings.fontColor.color))
+            text = "D: 0cm | T: 00:00"
+            setTextColor(colorToInt(settings.fontColor))
             textSize = 13f
             isSingleLine = true
             maxLines = 1
@@ -177,6 +173,7 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = 0
             y = dpToPx(40)
         }
         layoutParams = params
@@ -267,10 +264,14 @@ class OverlayService : Service() {
                 // Update background tint + transparency
                 bg?.setColor(tintColorFromHue(s.windowTintHue, s.windowTransparency))
 
-                // Update font
+                // Update font and text
                 feedLabel?.let { label ->
-                    label.setTextColor(colorToInt(s.fontColor.color))
+                    label.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
+                    label.setTextColor(colorToInt(s.fontColor))
+                    label.text = "D: ${s.distanceCm}cm | T: ${String.format("%02d:%02d", s.timeHours, s.timeMinutes)}"
                 }
+                
+                statusDot?.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
 
                 // Apply layout changes
                 try { windowManager.updateViewLayout(container, layoutParams) } catch (_: Exception) {}
@@ -296,8 +297,6 @@ class OverlayService : Service() {
         )
     }
 
-    private fun lerp(min: Int, max: Int, fraction: Float): Int =
-        (min + (max - min) * fraction).toInt()
 
 
     // ── Drag Touch Listener ──────────────────────────────────────

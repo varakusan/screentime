@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,10 +36,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,12 +57,23 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -159,6 +177,8 @@ fun SettingsScreen(
     onOverlayToggle: (Boolean) -> Unit
 ) {
     val settings by vm.settings.collectAsState()
+    var showColorPicker by remember { mutableStateOf(false) }
+    var showShapePicker by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -176,27 +196,18 @@ fun SettingsScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
+                .fillMaxWidth(0.96f)
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 32.dp),
+                .padding(vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Title
-            Text(
-                text = "⚙ Settings",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = 24.dp)
-            )
-
-            // ── Glass Card ──────────────────────────────────────
+            // Main Settings Card
             GlassCard {
                 Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // OVERLAY TOGGLE
+                    // 1. OVERLAY TOGGLE
                     SettingsToggleRow(
                         icon = Icons.Filled.Layers,
                         label = "Overlay Window",
@@ -207,7 +218,7 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // LIVE FEED TOGGLE
+                    // 2. LIVE FEED TOGGLE
                     SettingsToggleRow(
                         icon = Icons.Filled.LiveTv,
                         label = "Live Feed",
@@ -218,29 +229,18 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // WINDOW SIZE SLIDER
-                    SettingsSliderRow(
-                        icon = Icons.Filled.PhotoSizeSelectLarge,
-                        label = "Window Size",
-                        value = settings.windowSizeFraction,
-                        accentColor = AccentPurple,
-                        onValueChange = { vm.setWindowSize(it) }
-                    )
-
-                    GlassDivider()
-
-                    // TRANSPARENCY SLIDER
+                    // 3. TRANSPARENCY SLIDER
                     SettingsSliderRow(
                         icon = Icons.Filled.Opacity,
                         label = "Transparency",
-                        value = settings.windowTransparency,
+                        value = 1f - settings.windowTransparency,
                         accentColor = AccentCyan,
-                        onValueChange = { vm.setWindowTransparency(it) }
+                        onValueChange = { vm.setWindowTransparency(1f - it) }
                     )
 
                     GlassDivider()
 
-                    // WINDOW TINT/COLOR SLIDER
+                    // 4. WINDOW TINT SLIDER
                     SettingsSliderRow(
                         icon = Icons.Filled.Palette,
                         label = "Window Tint",
@@ -248,113 +248,113 @@ fun SettingsScreen(
                         accentColor = AccentYellow,
                         onValueChange = { vm.setWindowTintHue(it * 360f) }
                     )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                    GlassDivider()
 
-            // ── Shape & Font Card ──────────────────────────────
-            GlassCard {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Shape Settings
-                    Text(
-                        "Window Shape",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp
+                    // 5. DISTANCE METRIC (0-100 cm)
+                    SettingsSliderRow(
+                        icon = Icons.Filled.Straighten,
+                        label = "Distance (cm)",
+                        value = settings.distanceCm / 100f,
+                        accentColor = AccentPurple,
+                        onValueChange = { vm.setDistance((it * 100).toInt()) }
                     )
 
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        SettingsState.WindowShape.values().forEach { shape ->
-                            val selected = settings.windowShape == shape
-                            // Use simple shapes as icons
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (selected) AccentPurple.copy(alpha = 0.2f) else Color.Transparent
-                                    )
-                                    .border(
-                                        width = if (selected) 2.dp else 1.dp,
-                                        color = if (selected) AccentPurple else Color.White.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { vm.setWindowShape(shape) }
-                            ) {
-                                // Draw shape icon
-                                Canvas(modifier = Modifier.size(24.dp)) {
-                                    val color = if (selected) AccentPurple else Color.White.copy(alpha = 0.7f)
-                                    when (shape) {
-                                        SettingsState.WindowShape.Rectangle -> drawRect(color)
-                                        SettingsState.WindowShape.Rounded -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
-                                        SettingsState.WindowShape.Pill -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(100f))
-                                        SettingsState.WindowShape.Circle -> drawCircle(color)
-                                    }
-                                }
-                            }
+                    GlassDivider()
+
+                    // 6 & 7: TIME
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            SettingsSliderRow(
+                                icon = Icons.Filled.AccessTime,
+                                label = "Hours",
+                                value = settings.timeHours / 23f,
+                                accentColor = AccentYellow,
+                                onValueChange = { vm.setTimeHours((it * 23).toInt()) }
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            SettingsSliderRow(
+                                icon = Icons.Filled.AccessTime,
+                                label = "Minutes",
+                                value = settings.timeMinutes / 59f,
+                                accentColor = AccentPink,
+                                onValueChange = { vm.setTimeMinutes((it * 59).toInt()) }
+                            )
                         }
                     }
 
                     GlassDivider()
 
-                    // Font Color Picker (Scrollable Row)
-                    Text(
-                        "Font Color",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 14.sp
-                    )
-
+                    // 8. SHAPE & COLOR CLICKABLE TITLES
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        SettingsState.OverlayColor.values().forEach { overlayColor ->
-                            val isSelected = settings.fontColor == overlayColor
-                            val animatedScale by animateFloatAsState(
-                                targetValue = if (isSelected) 1.2f else 1f,
-                                label = "scale"
-                            )
-                            
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .scale(animatedScale)
-                                    .clip(CircleShape)
-                                    .background(overlayColor.color)
-                                    .clickable { vm.setFontColor(overlayColor) }
-                            ) {
-                                if (isSelected) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.Black.copy(alpha = 0.5f))
-                                    )
-                                }
-                            }
+                        // Clickable Shape Title
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showShapePicker = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.PhotoSizeSelectLarge, null, tint = AccentPurple, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+
+                        // Clickable Color Title
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showColorPicker = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            ColorWheelWithPlus(modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Version label
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Screen Overlay v1.0",
-                color = Color.White.copy(alpha = 0.3f),
-                fontSize = 12.sp
+                color = Color.White.copy(alpha = 0.2f),
+                fontSize = 10.sp
+            )
+        }
+
+        if (showColorPicker) {
+            val initialColor = remember { settings.fontColor }
+            EditColorsDialog(
+                initialColor = initialColor,
+                onColorChange = { vm.setFontColor(it) },
+                onColorSelected = { 
+                    vm.setFontColor(it)
+                    val newCustom = (listOf(it) + settings.customColors).distinct().take(14)
+                    vm.updateCustomColors(newCustom)
+                    showColorPicker = false 
+                },
+                onDismiss = { 
+                    vm.setFontColor(initialColor)
+                    showColorPicker = false 
+                }
+            )
+        }
+
+        if (showShapePicker) {
+            ShapeSelectionDialog(
+                initialShape = settings.windowShape,
+                onShapeSelected = { 
+                    vm.setWindowShape(it)
+                    showShapePicker = false 
+                },
+                onDismiss = { showShapePicker = false }
             )
         }
     }
@@ -408,6 +408,280 @@ fun GlassDivider() {
     )
 }
 
+// ── MS Paint Style Color Picker ─────────────────────────────────
+
+@Composable
+fun EditColorsDialog(
+    initialColor: Color,
+    onColorChange: (Color) -> Unit,
+    onColorSelected: (Color) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var hsv by remember { 
+        val hsvRes = FloatArray(3)
+        android.graphics.Color.colorToHSV(initialColor.toArgb(), hsvRes)
+        mutableStateOf(hsvRes) 
+    }
+    
+    val currentColor = Color.hsv(hsv[0], hsv[1], hsv[2])
+    
+    // Trigger real-time update
+    LaunchedEffect(currentColor) {
+        onColorChange(currentColor)
+    }
+
+    var hexText by remember { mutableStateOf(String.format("#%06X", (0xFFFFFF and initialColor.toArgb()))) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Edit Colors", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Spectrum
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)
+                                )
+                            )
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, _ ->
+                                    val x = change.position.x.coerceIn(0f, size.width.toFloat())
+                                    val y = change.position.y.coerceIn(0f, size.height.toFloat())
+                                    hsv = floatArrayOf((x / size.width) * 360f, 1f - (y / size.height), hsv[2])
+                                    hexText = String.format("#%06X", (0xFFFFFF and currentColor.toArgb()))
+                                }
+                            }
+                    ) {
+                        // Gray overlay for saturation
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.Transparent, Color.White)
+                                    )
+                                )
+                        )
+                    }
+                    
+                    // Luminosity Slider
+                    Column(
+                        modifier = Modifier.width(30.dp).fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .width(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.White, currentColor.copy(alpha = 1f), Color.Black)
+                                    )
+                                )
+                                .pointerInput(Unit) {
+                                    detectDragGestures { change, _ ->
+                                        val y = change.position.y.coerceIn(0f, size.height.toFloat())
+                                        hsv = floatArrayOf(hsv[0], hsv[1], 1f - (y / size.height))
+                                        hexText = String.format("#%06X", (0xFFFFFF and currentColor.toArgb()))
+                                    }
+                                }
+                        )
+                    }
+                }
+                
+                // RGB & Hex Inputs
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val rgb = arrayOf(
+                        (currentColor.red * 255).toInt(),
+                        (currentColor.green * 255).toInt(),
+                        (currentColor.blue * 255).toInt()
+                    )
+                    
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Hex", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                        TextField(
+                            value = hexText,
+                            onValueChange = { hexText = it },
+                            modifier = Modifier.height(36.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.White.copy(alpha = 0.1f),
+                                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                                focusedIndicatorColor = AccentCyan,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+                    }
+                    
+                    listOf("R", "G", "B").forEachIndexed { i, label ->
+                        Column(modifier = Modifier.width(40.dp)) {
+                            Text(label, color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(28.dp)
+                                    .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(4.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("${rgb[i]}", color = Color.White, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+                
+                // OK / Cancel
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AccentCyan)
+                            .clickable { onColorSelected(currentColor) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("OK", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Cancel", color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ShapeSelectionDialog(
+    initialShape: SettingsState.WindowShape,
+    onShapeSelected: (SettingsState.WindowShape) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Select Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    SettingsState.WindowShape.values().forEach { shape ->
+                        val selected = initialShape == shape
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickable { onShapeSelected(shape) }
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) AccentPurple.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f))
+                                    .border(
+                                        width = if (selected) 2.dp else 1.dp,
+                                        color = if (selected) AccentPurple else Color.White.copy(alpha = 0.1f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                            ) {
+                                Canvas(modifier = Modifier.size(24.dp)) {
+                                    val color = if (selected) AccentPurple else Color.White.copy(alpha = 0.7f)
+                                    when (shape) {
+                                        SettingsState.WindowShape.Rectangle -> drawRect(color)
+                                        SettingsState.WindowShape.Rounded -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
+                                        SettingsState.WindowShape.Pill -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(100f))
+                                        SettingsState.WindowShape.Circle -> drawCircle(color)
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = shape.name,
+                                color = if (selected) AccentPurple else Color.White.copy(alpha = 0.6f),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Close", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ColorWheelWithPlus(modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.TopEnd) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val sweepGradient = Brush.sweepGradient(
+                colors = listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)
+            )
+            drawCircle(brush = sweepGradient)
+        }
+        Box(
+            modifier = Modifier
+                .offset(4.dp, (-4).dp)
+                .size(14.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+                .border(1.dp, Color.Gray, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = Color.Black,
+                modifier = Modifier.size(10.dp)
+            )
+        }
+    }
+}
+
 @Composable
 fun SettingsToggleRow(
     icon: ImageVector,
@@ -425,7 +699,7 @@ fun SettingsToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -441,7 +715,7 @@ fun SettingsToggleRow(
                 text = label,
                 color = Color.White,
                 fontWeight = FontWeight.Medium,
-                fontSize = 16.sp
+                fontSize = 15.sp
             )
         }
 
@@ -467,7 +741,7 @@ fun SettingsSliderRow(
     accentColor: Color,
     onValueChange: (Float) -> Unit
 ) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+    Column(modifier = Modifier.padding(vertical = 1.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -478,31 +752,36 @@ fun SettingsSliderRow(
                     icon,
                     contentDescription = null,
                     tint = accentColor,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = label,
                     color = Color.White,
                     fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp
+                    fontSize = 14.sp
                 )
             }
 
             Text(
-                text = "${(value * 100).toInt()}%",
+                text = label.let { 
+                    if (it.contains("cm")) "${(value * 100).toInt()}cm"
+                    else if (it.contains("Hours")) "${(value * 23).toInt()}h"
+                    else if (it.contains("Minutes")) "${(value * 59).toInt()}m"
+                    else "${(value * 100).toInt()}%"
+                },
                 color = accentColor,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                fontSize = 13.sp
             )
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         Slider(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(24.dp),
             colors = SliderDefaults.colors(
                 thumbColor = accentColor,
                 activeTrackColor = accentColor,

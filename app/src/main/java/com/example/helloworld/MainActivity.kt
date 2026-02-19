@@ -15,6 +15,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +38,8 @@ import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
-import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -82,6 +85,16 @@ class MainActivity : ComponentActivity() {
         } else {
             SettingsState.update { it.copy(overlayEnabled = false) }
         }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        SettingsState.update { it.copy(isDocked = true) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        SettingsState.update { it.copy(isDocked = false) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -240,65 +253,59 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ── Font Settings Card ──────────────────────────────
+            // ── Shape & Font Card ──────────────────────────────
             GlassCard {
                 Column(
                     modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.TextFields,
-                            contentDescription = null,
-                            tint = AccentGreen,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            "Font Style",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
-                        )
-                    }
+                    // Shape Settings
+                    Text(
+                        "Window Shape",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp
+                    )
 
-                    // Font style chips
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        SettingsState.FontStyleOption.values().forEach { option ->
-                            val selected = settings.fontStyle == option
-                            FilterChip(
-                                selected = selected,
-                                onClick = { vm.setFontStyle(option) },
-                                label = {
-                                    Text(
-                                        text = option.name,
-                                        fontStyle = if (option == SettingsState.FontStyleOption.Italic)
-                                            FontStyle.Italic else FontStyle.Normal,
-                                        fontSize = 13.sp
+                        SettingsState.WindowShape.values().forEach { shape ->
+                            val selected = settings.windowShape == shape
+                            // Use simple shapes as icons
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (selected) AccentPurple.copy(alpha = 0.2f) else Color.Transparent
                                     )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AccentGreen.copy(alpha = 0.25f),
-                                    selectedLabelColor = AccentGreen,
-                                    containerColor = Color.Transparent,
-                                    labelColor = Color.White.copy(alpha = 0.7f)
-                                ),
-                                modifier = Modifier.border(
-                                    width = 1.dp,
-                                    color = if (selected) AccentGreen.copy(alpha = 0.5f)
-                                        else Color.White.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                            )
+                                    .border(
+                                        width = if (selected) 2.dp else 1.dp,
+                                        color = if (selected) AccentPurple else Color.White.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { vm.setWindowShape(shape) }
+                            ) {
+                                // Draw shape icon
+                                Canvas(modifier = Modifier.size(24.dp)) {
+                                    val color = if (selected) AccentPurple else Color.White.copy(alpha = 0.7f)
+                                    when (shape) {
+                                        SettingsState.WindowShape.Rectangle -> drawRect(color)
+                                        SettingsState.WindowShape.Rounded -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx()))
+                                        SettingsState.WindowShape.Pill -> drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(100f))
+                                        SettingsState.WindowShape.Circle -> drawCircle(color)
+                                    }
+                                }
+                            }
                         }
                     }
 
                     GlassDivider()
 
-                    // Font color presets
+                    // Font Color Picker (Scrollable Row)
                     Text(
                         "Font Color",
                         color = Color.White.copy(alpha = 0.8f),
@@ -306,35 +313,36 @@ fun SettingsScreen(
                     )
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        val presets = listOf(
-                            Color.White to "White",
-                            AccentYellow to "Yellow",
-                            AccentCyan to "Cyan",
-                            AccentGreen to "Green",
-                            AccentPink to "Pink"
-                        )
-                        presets.forEach { (color, _) ->
-                            val isSelected = settings.fontColor == color
-                            val animatedBorderAlpha by animateFloatAsState(
-                                targetValue = if (isSelected) 1f else 0f,
-                                animationSpec = tween(300),
-                                label = "borderAlpha"
+                        SettingsState.OverlayColor.values().forEach { overlayColor ->
+                            val isSelected = settings.fontColor == overlayColor
+                            val animatedScale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.2f else 1f,
+                                label = "scale"
                             )
+                            
                             Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .size(36.dp)
+                                    .scale(animatedScale)
                                     .clip(CircleShape)
-                                    .background(color)
-                                    .border(
-                                        width = 3.dp,
-                                        color = Color.White.copy(alpha = animatedBorderAlpha),
-                                        shape = CircleShape
+                                    .background(overlayColor.color)
+                                    .clickable { vm.setFontColor(overlayColor) }
+                            ) {
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Black.copy(alpha = 0.5f))
                                     )
-                                    .clickable { vm.setFontColor(color) }
-                            )
+                                }
+                            }
                         }
                     }
                 }

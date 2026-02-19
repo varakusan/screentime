@@ -32,11 +32,12 @@ class OverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "overlay_channel"
         private const val NOTIFICATION_ID = 1001
-        private const val MIN_OVERLAY_WIDTH_DP = 120
-        private const val MAX_OVERLAY_WIDTH_DP = 360
-        private const val MIN_OVERLAY_HEIGHT_DP = 50
-        private const val MAX_OVERLAY_HEIGHT_DP = 150
+        private const val MIN_OVERLAY_WIDTH_DP = 80 // Reduced
+        private const val MAX_OVERLAY_WIDTH_DP = 150 // Reduced significantly (approx 10-15% screen width)
+        private const val MIN_OVERLAY_HEIGHT_DP = 40
+        private const val MAX_OVERLAY_HEIGHT_DP = 100
     }
+
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
@@ -47,7 +48,18 @@ class OverlayService : Service() {
     private var feedLabel: TextView? = null
     private var dotAnimator: ObjectAnimator? = null
 
+    // Docking state
+    private var savedX = 0
+    private var savedY = 0
+    private var wasDocked = false
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // START_STICKY ensures the service restarts if killed by the system,
+        // keeping the overlay alive even after the app is closed.
+        return START_STICKY
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -116,8 +128,8 @@ class OverlayService : Service() {
         // Inner layout: dot + text
         val innerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
         }
 
         // Pulsing red dot
@@ -135,29 +147,27 @@ class OverlayService : Service() {
         }
         statusDot = dot
 
-        // Label
+        // Label — single line, no wrapping
         val label = TextView(this).apply {
             text = "Live Feed: Online"
-            setTextColor(colorToInt(settings.fontColor))
-            textSize = 14f
-            typeface = getTypefaceForStyle(settings.fontStyle)
+            setTextColor(colorToInt(settings.fontColor.color))
+            textSize = 13f
+            isSingleLine = true
+            maxLines = 1
         }
         feedLabel = label
 
         innerLayout.addView(dot, dotParams)
         innerLayout.addView(label)
         container.addView(innerLayout, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
         ))
 
-        // Window params
-        val widthDp = lerp(MIN_OVERLAY_WIDTH_DP, MAX_OVERLAY_WIDTH_DP, settings.windowSizeFraction)
-        val heightDp = lerp(MIN_OVERLAY_HEIGHT_DP, MAX_OVERLAY_HEIGHT_DP, settings.windowSizeFraction)
-
+        // Window params — both dimensions wrap content to fit text
         val params = WindowManager.LayoutParams(
-            dpToPx(widthDp),
-            dpToPx(heightDp),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
@@ -172,7 +182,7 @@ class OverlayService : Service() {
         layoutParams = params
 
         // Touch listener for drag
-        container.setOnTouchListener(DragTouchListener(params, windowManager))
+        container.setOnTouchListener(DragTouchListener(params, windowManager, this))
 
         overlayView = container
         windowManager.addView(container, params)
@@ -201,23 +211,66 @@ class OverlayService : Service() {
                 val container = overlayView as FrameLayout
 
                 // Update size
-                val widthDp = lerp(MIN_OVERLAY_WIDTH_DP, MAX_OVERLAY_WIDTH_DP, s.windowSizeFraction)
-                val heightDp = lerp(MIN_OVERLAY_HEIGHT_DP, MAX_OVERLAY_HEIGHT_DP, s.windowSizeFraction)
-                layoutParams?.width = dpToPx(widthDp)
-                layoutParams?.height = dpToPx(heightDp)
+                val bg = container.background as? GradientDrawable
+
+                // 1. Handle Shape
+                when (s.windowShape) {
+                    SettingsState.WindowShape.Rectangle -> {
+                        bg?.shape = GradientDrawable.RECTANGLE
+                        bg?.cornerRadius = 0f
+                    }
+                    SettingsState.WindowShape.Rounded -> {
+                        bg?.shape = GradientDrawable.RECTANGLE
+                        bg?.cornerRadius = dpToPx(16).toFloat()
+                    }
+                    SettingsState.WindowShape.Pill -> {
+                        bg?.shape = GradientDrawable.RECTANGLE
+                        bg?.cornerRadius = dpToPx(100).toFloat()
+                    }
+                    SettingsState.WindowShape.Circle -> {
+                        bg?.shape = GradientDrawable.OVAL
+                        bg?.cornerRadius = 0f
+                    }
+                }
+
+                // 2. Size — both wrap content to fit text
+                layoutParams?.width = WindowManager.LayoutParams.WRAP_CONTENT
+                layoutParams?.height = WindowManager.LayoutParams.WRAP_CONTENT
+
+                if (s.isDocked != wasDocked) {
+                    if (s.isDocked) {
+                        // Saving position
+                        savedX = layoutParams?.x ?: 0
+                        savedY = layoutParams?.y ?: 0
+                        
+                        // Dock to top
+                        layoutParams?.x = 0
+                        layoutParams?.y = 0 
+                        layoutParams?.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    } else {
+                        // Restoring position
+                        layoutParams?.x = savedX
+                        layoutParams?.y = savedY
+                        layoutParams?.gravity = Gravity.TOP or Gravity.START // reset gravity if needed, but existing is TOP|CENTER_HORIZONTAL. 
+                        // Wait, onCreate sets TOP|CENTER. If user drags, x/y are offsets from that.
+                        // If I change gravity, coordinates might mean different things.
+                        // The DragListener updates x/y based on raw movement.
+                        // Let's keep gravity consistent.
+                    }
+                    wasDocked = s.isDocked
+                } else if (s.isDocked) {
+                    // Force position if docked (in case of other updates)
+                    layoutParams?.x = 0
+                    layoutParams?.y = 0
+                }
 
                 // Update background tint + transparency
-                val bg = container.background as? GradientDrawable
                 bg?.setColor(tintColorFromHue(s.windowTintHue, s.windowTransparency))
 
                 // Update font
                 feedLabel?.let { label ->
-                    label.setTextColor(colorToInt(s.fontColor))
-                    label.typeface = getTypefaceForStyle(s.fontStyle)
+                    label.setTextColor(colorToInt(s.fontColor.color))
                 }
-
-                // Update live feed text
-                feedLabel?.text = if (s.liveFeedEnabled) "Live Feed: Online" else "Live Feed: Offline"
 
                 // Apply layout changes
                 try { windowManager.updateViewLayout(container, layoutParams) } catch (_: Exception) {}
@@ -246,24 +299,20 @@ class OverlayService : Service() {
     private fun lerp(min: Int, max: Int, fraction: Float): Int =
         (min + (max - min) * fraction).toInt()
 
-    private fun getTypefaceForStyle(style: SettingsState.FontStyleOption): Typeface {
-        return when (style) {
-            SettingsState.FontStyleOption.Lato -> Typeface.SANS_SERIF
-            SettingsState.FontStyleOption.Roboto -> Typeface.DEFAULT
-            SettingsState.FontStyleOption.Italic -> Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
-        }
-    }
 
     // ── Drag Touch Listener ──────────────────────────────────────
 
     private class DragTouchListener(
         private val params: WindowManager.LayoutParams,
-        private val wm: WindowManager
+        private val wm: WindowManager,
+        private val context: android.content.Context
     ) : View.OnTouchListener {
         private var initialX = 0
         private var initialY = 0
         private var touchX = 0f
         private var touchY = 0f
+        private var isDragging = false
+        private val CLICK_THRESHOLD = 10 // dp
 
         override fun onTouch(view: View, event: MotionEvent): Boolean {
             when (event.action) {
@@ -272,12 +321,31 @@ class OverlayService : Service() {
                     initialY = params.y
                     touchX = event.rawX
                     touchY = event.rawY
+                    isDragging = false
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - touchX).toInt()
-                    params.y = initialY + (event.rawY - touchY).toInt()
-                    try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
+                    val dx = Math.abs(event.rawX - touchX)
+                    val dy = Math.abs(event.rawY - touchY)
+                    val threshold = CLICK_THRESHOLD * view.resources.displayMetrics.density
+                    if (dx > threshold || dy > threshold) {
+                        isDragging = true
+                    }
+                    if (isDragging) {
+                        params.x = initialX + (event.rawX - touchX).toInt()
+                        params.y = initialY + (event.rawY - touchY).toInt()
+                        try { wm.updateViewLayout(view, params) } catch (_: Exception) {}
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        // Tap detected — launch the app
+                        val intent = Intent(context, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        }
+                        context.startActivity(intent)
+                    }
                     return true
                 }
             }

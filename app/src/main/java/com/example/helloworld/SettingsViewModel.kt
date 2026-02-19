@@ -32,11 +32,15 @@ class SettingsViewModel : ViewModel() {
         SettingsState.update { it.copy(windowTintHue = hue.coerceIn(0f, 360f)) }
     }
 
-    fun setFontStyle(style: SettingsState.FontStyleOption) {
-        SettingsState.update { it.copy(fontStyle = style) }
+    fun setFontColor(color: SettingsState.OverlayColor) {
+        SettingsState.update { it.copy(fontColor = color) }
     }
 
-    fun setFontColor(color: Color) {
-        SettingsState.update { it.copy(fontColor = color) }
+    fun setWindowShape(shape: SettingsState.WindowShape) {
+        SettingsState.update { it.copy(windowShape = shape) }
+    }
+
+    fun setDocked(docked: Boolean) {
+        SettingsState.update { it.copy(isDocked = docked) }
     }
 }

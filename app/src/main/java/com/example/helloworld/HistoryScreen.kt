@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,9 +25,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.helloworld.ui.theme.*
+import java.util.*
 
 private enum class HistoryPeriod(val label: String) {
-    Day("Day"), Week("Week"), Month("Month"), Year("Year")
+    Day("Day"), Week("Week"), Month("Month"), Year("Year"), Custom("Custom")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +39,8 @@ fun HistoryScreen(onBack: () -> Unit) {
     val screenTimeManager = remember { ScreenTimeManager(context) }
 
     var selectedPeriod by remember { mutableStateOf(HistoryPeriod.Day) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val dateRangePickerState = rememberDateRangePickerState()
 
     // Re-derive data whenever period changes
     val liveState by SettingsState.state.collectAsState()
@@ -46,11 +51,20 @@ fun HistoryScreen(onBack: () -> Unit) {
     val weekAggregates = remember(selectedPeriod) { analytics.getLastWeeks(12) }
     val monthAggregates = remember(selectedPeriod) { analytics.getLastMonths(12) }
     val yearAggregates = remember(selectedPeriod) { analytics.getLastYears(5) }
+    
+    val customAggregate = remember(selectedPeriod, dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
+        if (selectedPeriod == HistoryPeriod.Custom && dateRangePickerState.selectedStartDateMillis != null && dateRangePickerState.selectedEndDateMillis != null) {
+            analytics.getRecordsForRange(
+                Date(dateRangePickerState.selectedStartDateMillis!!),
+                Date(dateRangePickerState.selectedEndDateMillis!!)
+            )
+        } else null
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        // ── Header with Back Button ──────────────────────────────
+        // ── Header with Back Button & Calendar ──────────────────────
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -63,8 +77,12 @@ fun HistoryScreen(onBack: () -> Unit) {
                 text = "Usage History",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.White,
+                modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { showDatePicker = true }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.CalendarMonth, "Pick Range", tint = AccentCyan, modifier = Modifier.size(20.dp))
+            }
         }
 
         // ── TODAY live card ───────────────────────────────────────
@@ -81,6 +99,9 @@ fun HistoryScreen(onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             HistoryPeriod.entries.forEach { period ->
+                // Only show Custom chip if it was actually selected via calendar
+                if (period == HistoryPeriod.Custom && selectedPeriod != HistoryPeriod.Custom) return@forEach
+                
                 val selected = period == selectedPeriod
                 Box(
                     modifier = Modifier
@@ -122,10 +143,15 @@ fun HistoryScreen(onBack: () -> Unit) {
                     .map { it.label to (it.screenTimeSecs to it.distanceViolations) }
                 HistoryPeriod.Year -> yearAggregates.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }
                     .map { it.label to (it.screenTimeSecs to it.distanceViolations) }
+                HistoryPeriod.Custom -> if (customAggregate != null) {
+                    listOf(customAggregate.label to (customAggregate.screenTimeSecs to customAggregate.distanceViolations))
+                } else emptyList()
             }
 
             if (itemsToShow.isEmpty()) {
-                item { EmptyState("No history yet.\nData archived each midnight.") }
+                val msg = if (selectedPeriod == HistoryPeriod.Custom) "Pick a date range using the calendar." 
+                          else "No history yet.\nData archived each midnight."
+                item { EmptyState(msg) }
             } else {
                 items(itemsToShow) { (label, data) ->
                     HistoryCard(
@@ -135,6 +161,58 @@ fun HistoryScreen(onBack: () -> Unit) {
                     )
                 }
             }
+        }
+    }
+
+    // ── Date Picker Dialog ──────────────────────────────────────
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (dateRangePickerState.selectedStartDateMillis != null && 
+                            dateRangePickerState.selectedEndDateMillis != null) {
+                            selectedPeriod = HistoryPeriod.Custom
+                        }
+                        showDatePicker = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AccentCyan)
+                ) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = Color(0xFF1A1F2B)
+            )
+        ) {
+            DateRangePicker(
+                state = dateRangePickerState,
+                modifier = Modifier.weight(1f).padding(top = 16.dp),
+                title = { Text("Select date range", modifier = Modifier.padding(16.dp), color = Color.White) },
+                headline = { Text("Range", modifier = Modifier.padding(16.dp), color = Color.White) },
+                showModeToggle = false,
+                colors = DatePickerDefaults.colors(
+                    containerColor = Color(0xFF1A1F2B),
+                    titleContentColor = Color.White,
+                    headlineContentColor = Color.White,
+                    weekdayContentColor = Color.White.copy(alpha = 0.5f),
+                    subheadContentColor = Color.White.copy(alpha = 0.5f),
+                    yearContentColor = Color.White,
+                    currentYearContentColor = AccentCyan,
+                    selectedYearContentColor = Color.Black,
+                    selectedYearContainerColor = AccentCyan,
+                    dayContentColor = Color.White,
+                    disabledDayContentColor = Color.White.copy(alpha = 0.2f),
+                    selectedDayContentColor = Color.Black,
+                    selectedDayContainerColor = AccentCyan,
+                    todayContentColor = AccentCyan,
+                    todayDateBorderColor = AccentCyan,
+                    dayInSelectionRangeContentColor = Color.White,
+                    dayInSelectionRangeContainerColor = AccentCyan.copy(alpha = 0.2f)
+                )
+            )
         }
     }
 }

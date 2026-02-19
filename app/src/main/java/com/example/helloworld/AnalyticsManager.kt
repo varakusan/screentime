@@ -158,4 +158,28 @@ class AnalyticsManager(context: Context) {
             PeriodAggregate(label, totalSecs, totalViolations)
         }
     }
+
+    /** Returns aggregated stats for an arbitrary date range (inclusive). */
+    fun getRecordsForRange(startDate: Date, endDate: Date): PeriodAggregate {
+        val cal = Calendar.getInstance()
+        cal.time = startDate
+        
+        var totalSecs = 0L
+        var totalViolations = 0
+        
+        // Ensure we don't loop forever if dates are swapped
+        if (startDate.after(endDate)) return PeriodAggregate("Custom Range", 0, 0)
+
+        // Iterate through each day until we pass the end date
+        while (!cal.time.after(endDate)) {
+            val dayDate = dateFormat.format(cal.time)
+            val record = getRecord(dayDate)
+            totalSecs += record.screenTimeSecs
+            totalViolations += record.distanceViolations
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        
+        val rangeLabel = "${SimpleDateFormat("MMM d", Locale.getDefault()).format(startDate)} - ${SimpleDateFormat("MMM d", Locale.getDefault()).format(endDate)}"
+        return PeriodAggregate(rangeLabel, totalSecs, totalViolations)
+    }
 }

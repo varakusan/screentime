@@ -8,6 +8,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 
 class ScreenTimeManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("screen_time_prefs", Context.MODE_PRIVATE)
@@ -55,7 +57,7 @@ class ScreenTimeManager(context: Context) {
                 distanceTargetCm = savedDistanceTarget,
                 windowTransparency = savedTransparency,
                 windowTintHue = savedHue,
-                fontColor = androidx.compose.ui.graphics.Color(savedFontColorLong.toULong()),
+                fontColor = Color(savedFontColorLong.toInt()),
                 windowShape = if (savedShape == SettingsState.WindowShape.Rectangle.name) 
                     SettingsState.WindowShape.Rectangle else SettingsState.WindowShape.Rounded
             ) 
@@ -84,7 +86,7 @@ class ScreenTimeManager(context: Context) {
     }
 
     fun saveFontColor(color: androidx.compose.ui.graphics.Color) {
-        prefs.edit().putLong(KEY_FONT_COLOR, color.value.toLong()).apply()
+        prefs.edit().putLong(KEY_FONT_COLOR, color.toArgb().toLong()).apply()
     }
 
     fun saveWindowShape(shape: SettingsState.WindowShape) {

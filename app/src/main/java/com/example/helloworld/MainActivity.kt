@@ -266,7 +266,8 @@ fun SettingsScreen(
     var showColorPicker by remember { mutableStateOf(false) }
     var showShapePicker by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
-    val activity = LocalContext.current as MainActivity
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() as? MainActivity } ?: return
 
     // Local states for target inputs to ensure smooth typing and sync
     var hoursInput by remember { mutableStateOf(TextFieldValue(settings.targetTimeHours.toString())) }
@@ -320,7 +321,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Layers,
                         label = "Overlay Window",
                         checked = settings.overlayEnabled,
-                        accentColor = AccentCyan,
+                        accentColor = settings.fontColor,
                         onCheckedChange = { onOverlayToggle(it) }
                     )
 
@@ -331,7 +332,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.LiveTv,
                         label = "Live Feed",
                         checked = settings.liveFeedEnabled,
-                        accentColor = AccentPink,
+                        accentColor = settings.fontColor,
                         onCheckedChange = { vm.setLiveFeedEnabled(it) }
                     )
 
@@ -342,7 +343,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Opacity,
                         label = "Transparency",
                         value = 1f - settings.windowTransparency,
-                        accentColor = AccentCyan,
+                        accentColor = settings.fontColor,
                         onValueChange = { vm.setWindowTransparency(1f - it, activity) }
                     )
 
@@ -353,7 +354,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Palette,
                         label = "Window Tint",
                         value = settings.windowTintHue / 360f,
-                        accentColor = AccentYellow,
+                        accentColor = settings.fontColor,
                         onValueChange = { vm.setWindowTintHue(it * 360f, activity) }
                     )
 
@@ -364,7 +365,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Straighten,
                         label = "Distance Target (cm)",
                         value = settings.distanceTargetCm / 100f,
-                        accentColor = AccentPurple,
+                        accentColor = settings.fontColor,
                         onValueChange = { vm.setDistanceTarget((it * 100).toInt(), activity) }
                     )
 
@@ -395,7 +396,7 @@ fun SettingsScreen(
                         Icon(
                             Icons.Filled.AccessTime,
                             null,
-                            tint = if (hasUsagePermission) screenTimeColor else AccentPink,
+                            tint = if (hasUsagePermission) screenTimeColor else settings.fontColor,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -444,7 +445,7 @@ fun SettingsScreen(
                         Icon(
                             Icons.Filled.Timer,
                             null,
-                            tint = AccentYellow,
+                            tint = settings.fontColor,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -496,7 +497,7 @@ fun SettingsScreen(
                                             }
                                         },
                                         textStyle = TextStyle(
-                                            color = AccentYellow,
+                                            color = settings.fontColor,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -509,7 +510,7 @@ fun SettingsScreen(
                                             onDone = { focusManager.clearFocus() }
                                         ),
                                         singleLine = true,
-                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentYellow)
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(settings.fontColor)
                                     )
                                 }
                             }
@@ -518,8 +519,9 @@ fun SettingsScreen(
                                 onValueChange = { vm.setTargetTimeHours((it * 23).toInt(), activity) },
                                 modifier = Modifier.height(24.dp),
                                 colors = SliderDefaults.colors(
-                                    thumbColor = AccentYellow,
-                                    activeTrackColor = AccentYellow
+                                    thumbColor = settings.fontColor,
+                                    activeTrackColor = settings.fontColor,
+                                    inactiveTrackColor = settings.fontColor.copy(alpha = 0.15f)
                                 )
                             )
                         }
@@ -564,7 +566,7 @@ fun SettingsScreen(
                                             }
                                         },
                                         textStyle = TextStyle(
-                                            color = AccentYellow,
+                                            color = settings.fontColor,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -577,7 +579,7 @@ fun SettingsScreen(
                                             onDone = { focusManager.clearFocus() }
                                         ),
                                         singleLine = true,
-                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(AccentYellow)
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(settings.fontColor)
                                     )
                                 }
                             }
@@ -586,8 +588,9 @@ fun SettingsScreen(
                                 onValueChange = { vm.setTargetTimeMinutes((it * 59).toInt(), activity) },
                                 modifier = Modifier.height(24.dp),
                                 colors = SliderDefaults.colors(
-                                    thumbColor = AccentYellow,
-                                    activeTrackColor = AccentYellow
+                                    thumbColor = settings.fontColor,
+                                    activeTrackColor = settings.fontColor,
+                                    inactiveTrackColor = settings.fontColor.copy(alpha = 0.15f)
                                 )
                             )
                         }
@@ -609,7 +612,7 @@ fun SettingsScreen(
                                 .clickable { showShapePicker = true }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.PhotoSizeSelectLarge, null, tint = AccentPurple, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.PhotoSizeSelectLarge, null, tint = settings.fontColor, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
@@ -622,7 +625,7 @@ fun SettingsScreen(
                                 .clickable { showHistory = true }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.BarChart, null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.BarChart, null, tint = settings.fontColor, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("History", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
@@ -1110,4 +1113,13 @@ fun SettingsSliderRow(
             )
         )
     }
+}
+
+/**
+ * Safely find the Activity from a given Context, unwrapping any ContextWrappers.
+ */
+fun Context.findActivity(): ComponentActivity? = when (this) {
+    is ComponentActivity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

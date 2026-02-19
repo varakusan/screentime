@@ -176,7 +176,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HelloWorldTheme {
-                MainScreen(
+                SettingsScreen(
                     onOverlayToggle = { enabled ->
                         if (enabled) {
                             if (Settings.canDrawOverlays(this)) {
@@ -250,73 +250,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MAIN SCREEN — Bottom Navigation container
-// ═══════════════════════════════════════════════════════════════
-
-@Composable
-fun MainScreen(onOverlayToggle: (Boolean) -> Unit) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-
-    Scaffold(
-        containerColor = Color(0xFF0D1B2A),
-        bottomBar = {
-            NavigationBar(
-                containerColor = Color(0xFF0D1420),
-                tonalElevation = 0.dp,
-                modifier = Modifier.border(
-                    1.dp,
-                    Color.White.copy(alpha = 0.08f),
-                    RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                )
-            ) {
-                NavigationBarItem(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    icon = {
-                        Icon(
-                            Icons.Filled.Settings, "Settings",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    },
-                    label = { Text("Settings", fontSize = 11.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = com.example.helloworld.ui.theme.AccentCyan,
-                        selectedTextColor = com.example.helloworld.ui.theme.AccentCyan,
-                        unselectedIconColor = Color.White.copy(alpha = 0.45f),
-                        unselectedTextColor = Color.White.copy(alpha = 0.45f),
-                        indicatorColor = com.example.helloworld.ui.theme.AccentCyan.copy(alpha = 0.15f)
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    icon = {
-                        Icon(
-                            Icons.Filled.BarChart, "History",
-                            modifier = Modifier.size(22.dp)
-                        )
-                    },
-                    label = { Text("History", fontSize = 11.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = com.example.helloworld.ui.theme.AccentCyan,
-                        selectedTextColor = com.example.helloworld.ui.theme.AccentCyan,
-                        unselectedIconColor = Color.White.copy(alpha = 0.45f),
-                        unselectedTextColor = Color.White.copy(alpha = 0.45f),
-                        indicatorColor = com.example.helloworld.ui.theme.AccentCyan.copy(alpha = 0.15f)
-                    )
-                )
-            }
-        }
-    ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding)) {
-            when (selectedTab) {
-                0 -> SettingsScreen(onOverlayToggle = onOverlayToggle)
-                1 -> HistoryScreen()
-            }
-        }
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  SETTINGS SCREEN — Glassmorphism Panel
@@ -332,6 +265,7 @@ fun SettingsScreen(
     val focusManager = LocalFocusManager.current
     var showColorPicker by remember { mutableStateOf(false) }
     var showShapePicker by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     val activity = LocalContext.current as MainActivity
 
     // Local states for target inputs to ensure smooth typing and sync
@@ -358,9 +292,8 @@ fun SettingsScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0x40000020),
-                        Color(0x60000030),
-                        Color(0x80000020)
+                        Color(0x00000000), // Transparent
+                        Color(0x00000000)
                     )
                 )
             ),
@@ -379,7 +312,10 @@ fun SettingsScreen(
                     modifier = Modifier.padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // 1. OVERLAY TOGGLE
+                    if (showHistory) {
+                        HistoryScreen(onBack = { showHistory = false })
+                    } else {
+                        // 1. OVERLAY TOGGLE
                     SettingsToggleRow(
                         icon = Icons.Filled.Layers,
                         label = "Overlay Window",
@@ -659,7 +595,7 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // 8. SHAPE & COLOR CLICKABLE TITLES
+                    // 8. SHAPE, HISTORY & COLOR CLICKABLE TITLES
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -671,11 +607,24 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { showShapePicker = true }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.PhotoSizeSelectLarge, null, tint = AccentPurple, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Icon(Icons.Default.PhotoSizeSelectLarge, null, tint = AccentPurple, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+
+                        // Clickable History Title
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showHistory = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.BarChart, null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("History", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
 
                         // Clickable Color Title
@@ -684,15 +633,16 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { showColorPicker = true }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            ColorWheelWithPlus(modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            ColorWheelWithPlus(modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
                     }
-                }
-            }
+                } // end else
+            } // end Column
+        } // end GlassCard
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(

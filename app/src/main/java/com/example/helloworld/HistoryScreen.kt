@@ -81,7 +81,7 @@ fun HistoryScreen(onBack: () -> Unit) {
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = { showDatePicker = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.CalendarMonth, "Pick Range", tint = AccentCyan, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.CalendarMonth, "Pick Range", tint = liveState.fontColor, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -107,7 +107,7 @@ fun HistoryScreen(onBack: () -> Unit) {
                     modifier = Modifier
                         .border(
                             1.dp,
-                            if (selected) AccentCyan.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
+                            if (selected) liveState.fontColor.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
                             RoundedCornerShape(50)
                         )
                 ) {
@@ -116,8 +116,8 @@ fun HistoryScreen(onBack: () -> Unit) {
                         onClick = { selectedPeriod = period },
                         label = { Text(period.label, fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AccentCyan.copy(alpha = 0.25f),
-                            selectedLabelColor = AccentCyan,
+                            selectedContainerColor = liveState.fontColor.copy(alpha = 0.25f),
+                            selectedLabelColor = liveState.fontColor,
                             containerColor = Color.White.copy(alpha = 0.07f),
                             labelColor = Color.White.copy(alpha = 0.6f)
                         ),

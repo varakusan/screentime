@@ -90,7 +90,7 @@ class OverlayService : LifecycleService() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         screenTimeManager = ScreenTimeManager(this)
         screenTimeManager.loadInitialState(force = true)
-        faceDistanceTracker = FaceDistanceTracker(this)
+        faceDistanceTracker = FaceDistanceTracker(this, screenTimeManager)
         SettingsState.update { it.copy(overlayEnabled = true) }
         
         createNotificationChannel()

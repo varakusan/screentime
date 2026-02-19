@@ -24,6 +24,7 @@ class ScreenTimeManager(context: Context) {
         private const val KEY_WINDOW_TINT_HUE = "window_tint_hue"
         private const val KEY_FONT_COLOR = "font_color"
         private const val KEY_WINDOW_SHAPE = "window_shape"
+        private const val KEY_DISTANCE_VIOLATIONS = "distance_violations_today"
     }
 
     init {
@@ -114,8 +115,20 @@ class ScreenTimeManager(context: Context) {
 
     fun reset() {
         SettingsState.update { it.copy(accumulatedSeconds = 0) }
-        saveToDisk()
+        prefs.edit()
+            .putLong(KEY_ACCUMULATED_SECONDS, 0L)
+            .putInt(KEY_DISTANCE_VIOLATIONS, 0)
+            .apply()
     }
+
+    /** Increments the distance violation counter and immediately persists it. */
+    fun recordDistanceViolation() {
+        val current = prefs.getInt(KEY_DISTANCE_VIOLATIONS, 0)
+        prefs.edit().putInt(KEY_DISTANCE_VIOLATIONS, current + 1).apply()
+    }
+
+    /** Returns how many distance violations have been recorded today so far. */
+    fun getDistanceViolationCount(): Int = prefs.getInt(KEY_DISTANCE_VIOLATIONS, 0)
 
     private fun saveToDisk() {
         val currentSeconds = SettingsState.state.value.accumulatedSeconds

@@ -26,7 +26,10 @@ import kotlin.math.sqrt
  * rather than the service or activity. This means the camera keeps running
  * even when the main app is closed, as long as the OverlayService is alive.
  */
-class FaceDistanceTracker(private val context: Context) {
+class FaceDistanceTracker(
+    private val context: Context,
+    private val screenTimeManager: ScreenTimeManager
+) {
 
     // ── Self-managed lifecycle ────────────────────────────────────
     // We do NOT rely on the service's LifecycleOwner so the camera
@@ -51,6 +54,10 @@ class FaceDistanceTracker(private val context: Context) {
 
     private var lastUpdateTime = 0L
     private val UPDATE_INTERVAL_MS = 2000L
+
+    // Throttle violation recording: only record once per 10 seconds to avoid spam
+    private var lastViolationTime = 0L
+    private val VIOLATION_INTERVAL_MS = 10_000L
 
     private var isRunning = false
 
@@ -163,6 +170,14 @@ class FaceDistanceTracker(private val context: Context) {
                                 val pixelDist = sqrt((p1.x - p2.x).pow(2) + (p1.y - p2.y).pow(2))
                                 val distCm = (focalLengthEquivalent * AVG_IPD_CM) / pixelDist
                                 SettingsState.update { it.copy(liveDistanceCm = distCm) }
+
+                                // Record violation if too close, throttled to avoid spam
+                                val target = SettingsState.state.value.distanceTargetCm
+                                val now2 = System.currentTimeMillis()
+                                if (distCm <= target && (now2 - lastViolationTime) >= VIOLATION_INTERVAL_MS) {
+                                    lastViolationTime = now2
+                                    screenTimeManager.recordDistanceViolation()
+                                }
                             }
                         } else {
                             SettingsState.update { it.copy(liveDistanceCm = -1f) }

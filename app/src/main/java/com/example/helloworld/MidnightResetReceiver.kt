@@ -10,8 +10,16 @@ import java.util.Calendar
 
 class MidnightResetReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // Reset the screen time
         val manager = ScreenTimeManager(context)
+        val analytics = AnalyticsManager(context)
+
+        // Archive today's data BEFORE resetting counters
+        val today = analytics.getTodayDate()
+        val todaySeconds = SettingsState.state.value.accumulatedSeconds
+        val todayViolations = manager.getDistanceViolationCount()
+        analytics.recordDaySnapshot(today, todaySeconds, todayViolations)
+
+        // Now reset the live counters for the new day
         manager.reset()
 
         // Reschedule for next midnight

@@ -41,6 +41,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Opacity
@@ -57,6 +60,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -169,7 +176,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HelloWorldTheme {
-                SettingsScreen(
+                MainScreen(
                     onOverlayToggle = { enabled ->
                         if (enabled) {
                             if (Settings.canDrawOverlays(this)) {
@@ -240,6 +247,74 @@ class MainActivity : ComponentActivity() {
             }
         }
         return false
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN SCREEN — Bottom Navigation container
+// ═══════════════════════════════════════════════════════════════
+
+@Composable
+fun MainScreen(onOverlayToggle: (Boolean) -> Unit) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    Scaffold(
+        containerColor = Color(0xFF0D1B2A),
+        bottomBar = {
+            NavigationBar(
+                containerColor = Color(0xFF0D1420),
+                tonalElevation = 0.dp,
+                modifier = Modifier.border(
+                    1.dp,
+                    Color.White.copy(alpha = 0.08f),
+                    RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                )
+            ) {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = {
+                        Icon(
+                            Icons.Filled.Settings, "Settings",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    label = { Text("Settings", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = com.example.helloworld.ui.theme.AccentCyan,
+                        selectedTextColor = com.example.helloworld.ui.theme.AccentCyan,
+                        unselectedIconColor = Color.White.copy(alpha = 0.45f),
+                        unselectedTextColor = Color.White.copy(alpha = 0.45f),
+                        indicatorColor = com.example.helloworld.ui.theme.AccentCyan.copy(alpha = 0.15f)
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = {
+                        Icon(
+                            Icons.Filled.BarChart, "History",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    label = { Text("History", fontSize = 11.sp) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = com.example.helloworld.ui.theme.AccentCyan,
+                        selectedTextColor = com.example.helloworld.ui.theme.AccentCyan,
+                        unselectedIconColor = Color.White.copy(alpha = 0.45f),
+                        unselectedTextColor = Color.White.copy(alpha = 0.45f),
+                        indicatorColor = com.example.helloworld.ui.theme.AccentCyan.copy(alpha = 0.15f)
+                    )
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            when (selectedTab) {
+                0 -> SettingsScreen(onOverlayToggle = onOverlayToggle)
+                1 -> HistoryScreen()
+            }
+        }
     }
 }
 

@@ -1,8 +1,6 @@
 package com.example.helloworld
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.helloworld.ui.theme.*
+import java.text.SimpleDateFormat
 import java.util.*
 
 private enum class HistoryPeriod(val label: String) {
@@ -38,33 +37,104 @@ fun HistoryScreen(onBack: () -> Unit) {
     val analytics = remember { AnalyticsManager(context) }
     val screenTimeManager = remember { ScreenTimeManager(context) }
 
-    var selectedPeriod by remember { mutableStateOf(HistoryPeriod.Day) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    val dateRangePickerState = rememberDateRangePickerState()
+    var selectedPeriod by remember { mutableStateOf(HistoryPeriod.Week) }
+    var showCustomRangePicker by remember { mutableStateOf(false) }
+    
+    // Custom start/end dates for Custom Range
+    var customStartDate by remember { mutableStateOf<Date?>(null) }
+    var customEndDate by remember { mutableStateOf<Date?>(null) }
 
-    // Re-derive data whenever period changes
     val liveState by SettingsState.state.collectAsState()
     val todayViolations = remember(liveState) { screenTimeManager.getDistanceViolationCount() }
 
-    // Compute list items
-    val dayRecords = remember(selectedPeriod) { analytics.getLastDays(30) }
-    val weekAggregates = remember(selectedPeriod) { analytics.getLastWeeks(12) }
-    val monthAggregates = remember(selectedPeriod) { analytics.getLastMonths(12) }
-    val yearAggregates = remember(selectedPeriod) { analytics.getLastYears(5) }
+    // Derive range and data
+    val calendar = Calendar.getInstance()
     
-    val customAggregate = remember(selectedPeriod, dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
-        if (selectedPeriod == HistoryPeriod.Custom && dateRangePickerState.selectedStartDateMillis != null && dateRangePickerState.selectedEndDateMillis != null) {
-            analytics.getRecordsForRange(
-                Date(dateRangePickerState.selectedStartDateMillis!!),
-                Date(dateRangePickerState.selectedEndDateMillis!!)
-            )
-        } else null
+    // Calculate display labels for all default ranges
+    val weekRangeLabel = remember {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+        val start = cal.time
+        cal.add(Calendar.DAY_OF_YEAR, 6)
+        val end = cal.time
+        val sdf = SimpleDateFormat("MMM d", Locale.getDefault())
+        "${sdf.format(start)} - ${sdf.format(end)}"
+    }
+    val monthRangeLabel = remember {
+        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
+    }
+    val yearRangeLabel = remember {
+        SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+    }
+
+    val rangeData: List<AnalyticsManager.DayRecord> = remember(selectedPeriod, customStartDate, customEndDate) {
+        val cal = Calendar.getInstance()
+        when (selectedPeriod) {
+            HistoryPeriod.Day -> listOf(analytics.getRecord(analytics.getTodayDate()))
+            HistoryPeriod.Week -> {
+                cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
+                val start = cal.time
+                val records = mutableListOf<AnalyticsManager.DayRecord>()
+                for (i in 0..6) {
+                    records.add(analytics.getRecord(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)))
+                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                }
+                records
+            }
+            HistoryPeriod.Month -> {
+                cal.set(Calendar.DAY_OF_MONTH, 1)
+                val days = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+                val records = mutableListOf<AnalyticsManager.DayRecord>()
+                for (i in 0 until days) {
+                    records.add(analytics.getRecord(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)))
+                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                }
+                records
+            }
+            HistoryPeriod.Year -> {
+                // For year, we might just show last 12 months aggregated if daily is too much, 
+                // but prompt says "daily data should be displayd". 
+                // We'll fetch daily for current year.
+                cal.set(Calendar.DAY_OF_YEAR, 1)
+                val days = cal.getActualMaximum(Calendar.DAY_OF_YEAR)
+                val records = mutableListOf<AnalyticsManager.DayRecord>()
+                for (i in 0 until days) {
+                    records.add(analytics.getRecord(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)))
+                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                }
+                records
+            }
+            HistoryPeriod.Custom -> {
+                if (customStartDate != null && customEndDate != null) {
+                    analytics.getDailyRecordsForRange(customStartDate!!, customEndDate!!)
+                } else emptyList()
+            }
+        }
+    }
+
+    val rangeLabel = remember(selectedPeriod, rangeData, weekRangeLabel, monthRangeLabel, yearRangeLabel) {
+        when (selectedPeriod) {
+            HistoryPeriod.Week -> weekRangeLabel
+            HistoryPeriod.Month -> monthRangeLabel
+            HistoryPeriod.Year -> yearRangeLabel
+            HistoryPeriod.Day -> "Today"
+            HistoryPeriod.Custom -> {
+                if (rangeData.isEmpty()) "No range selected"
+                else {
+                    val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                    val sdfInput = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                    try {
+                        "${sdf.format(sdfInput.parse(rangeData.first().date)!!)} - ${sdf.format(sdfInput.parse(rangeData.last().date)!!)}"
+                    } catch (_: Exception) { "Custom Range" }
+                }
+            }
+        }
     }
 
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        // ── Header with Back Button & Calendar ──────────────────────
+        // ── Header ────────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -74,14 +144,14 @@ fun HistoryScreen(onBack: () -> Unit) {
             }
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "Usage History",
+                text = "Usage Activity",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = { showDatePicker = true }, modifier = Modifier.size(32.dp)) {
-                Icon(Icons.Default.CalendarMonth, "Pick Range", tint = liveState.fontColor, modifier = Modifier.size(20.dp))
+            IconButton(onClick = { showCustomRangePicker = true }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.DateRange, "Custom Range", tint = liveState.fontColor, modifier = Modifier.size(20.dp))
             }
         }
 
@@ -91,131 +161,292 @@ fun HistoryScreen(onBack: () -> Unit) {
             violations = todayViolations
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // ── Period selector chips ─────────────────────────────────
+        // ── Range Selectors ───────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            HistoryPeriod.entries.forEach { period ->
-                // Only show Custom chip if it was actually selected via calendar
-                if (period == HistoryPeriod.Custom && selectedPeriod != HistoryPeriod.Custom) return@forEach
-                
-                val selected = period == selectedPeriod
-                Box(
-                    modifier = Modifier
-                        .border(
-                            1.dp,
-                            if (selected) liveState.fontColor.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f),
-                            RoundedCornerShape(50)
-                        )
-                ) {
-                    FilterChip(
-                        selected = selected,
-                        onClick = { selectedPeriod = period },
-                        label = { Text(period.label, fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = liveState.fontColor.copy(alpha = 0.25f),
-                            selectedLabelColor = liveState.fontColor,
-                            containerColor = Color.White.copy(alpha = 0.07f),
-                            labelColor = Color.White.copy(alpha = 0.6f)
-                        ),
-                        border = null
-                    )
-                }
-            }
+            RangeButton(
+                label = "Weekly",
+                range = weekRangeLabel,
+                selected = selectedPeriod == HistoryPeriod.Week,
+                onClick = { selectedPeriod = HistoryPeriod.Week },
+                modifier = Modifier.weight(1f)
+            )
+            RangeButton(
+                label = "Monthly",
+                range = monthRangeLabel,
+                selected = selectedPeriod == HistoryPeriod.Month,
+                onClick = { selectedPeriod = HistoryPeriod.Month },
+                modifier = Modifier.weight(1f)
+            )
+            RangeButton(
+                label = "Yearly",
+                range = yearRangeLabel,
+                selected = selectedPeriod == HistoryPeriod.Year,
+                onClick = { selectedPeriod = HistoryPeriod.Year },
+                modifier = Modifier.weight(1f)
+            )
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // ── History list ──────────────────────────────────────────
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.heightIn(max = 300.dp) // Constrain height for embedding
-        ) {
-            val itemsToShow = when (selectedPeriod) {
-                HistoryPeriod.Day -> dayRecords.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }
-                    .map { it.displayLabel to (it.screenTimeSecs to it.distanceViolations) }
-                HistoryPeriod.Week -> weekAggregates.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }
-                    .map { it.label to (it.screenTimeSecs to it.distanceViolations) }
-                HistoryPeriod.Month -> monthAggregates.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }
-                    .map { it.label to (it.screenTimeSecs to it.distanceViolations) }
-                HistoryPeriod.Year -> yearAggregates.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }
-                    .map { it.label to (it.screenTimeSecs to it.distanceViolations) }
-                HistoryPeriod.Custom -> if (customAggregate != null) {
-                    listOf(customAggregate.label to (customAggregate.screenTimeSecs to customAggregate.distanceViolations))
-                } else emptyList()
-            }
+        // ── Chart Section ─────────────────────────────────────────
+        if (rangeData.isNotEmpty()) {
+            UsageChart(
+                records = rangeData,
+                accentColor = liveState.fontColor
+            )
+        } else {
+            EmptyState("No data for this range.")
+        }
 
-            if (itemsToShow.isEmpty()) {
-                val msg = if (selectedPeriod == HistoryPeriod.Custom) "Pick a date range using the calendar." 
-                          else "No history yet.\nData archived each midnight."
-                item { EmptyState(msg) }
+        Spacer(Modifier.height(16.dp))
+
+        // ── Detailed Stats List ───────────────────────────────────
+        Text(
+            "Detailed Breakdown",
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val sortedRecords = rangeData.filter { it.screenTimeSecs > 0 || it.distanceViolations > 0 }.reversed()
+            if (sortedRecords.isEmpty()) {
+                EmptyState("No non-zero activity records.")
             } else {
-                items(itemsToShow) { (label, data) ->
+                sortedRecords.forEach { record ->
                     HistoryCard(
-                        label = label,
-                        screenTimeSecs = data.first,
-                        violations = data.second
+                        label = record.displayLabel,
+                        screenTimeSecs = record.screenTimeSecs,
+                        violations = record.distanceViolations
                     )
                 }
             }
         }
+        
+        Spacer(Modifier.height(20.dp))
     }
 
-    // ── Date Picker Dialog ──────────────────────────────────────
-    if (showDatePicker) {
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (dateRangePickerState.selectedStartDateMillis != null && 
-                            dateRangePickerState.selectedEndDateMillis != null) {
-                            selectedPeriod = HistoryPeriod.Custom
-                        }
-                        showDatePicker = false
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = AccentCyan)
-                ) { Text("Apply") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            },
-            colors = DatePickerDefaults.colors(
-                containerColor = Color(0xFF1A1F2B)
-            )
+    if (showCustomRangePicker) {
+        DateRangeSelectionDialog(
+            initialStartDate = customStartDate ?: Date(),
+            initialEndDate = customEndDate ?: Date(),
+            onDismiss = { showCustomRangePicker = false },
+            onRangeSelected = { start, end ->
+                customStartDate = start
+                customEndDate = end
+                selectedPeriod = HistoryPeriod.Custom
+                showCustomRangePicker = false
+            }
+        )
+    }
+}
+
+@Composable
+fun RangeButton(
+    label: String,
+    range: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(60.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) AccentCyan.copy(alpha = 0.2f) else GlassBg,
+        border = BorderStroke(1.dp, if (selected) AccentCyan.copy(alpha = 0.5f) else GlassBorder)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(8.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            DateRangePicker(
-                state = dateRangePickerState,
-                modifier = Modifier.weight(1f).padding(top = 16.dp),
-                title = { Text("Select date range", modifier = Modifier.padding(16.dp), color = Color.White) },
-                headline = { Text("Range", modifier = Modifier.padding(16.dp), color = Color.White) },
-                showModeToggle = false,
-                colors = DatePickerDefaults.colors(
-                    containerColor = Color(0xFF1A1F2B),
-                    titleContentColor = Color.White,
-                    headlineContentColor = Color.White,
-                    weekdayContentColor = Color.White.copy(alpha = 0.5f),
-                    subheadContentColor = Color.White.copy(alpha = 0.5f),
-                    yearContentColor = Color.White,
-                    currentYearContentColor = AccentCyan,
-                    selectedYearContentColor = Color.Black,
-                    selectedYearContainerColor = AccentCyan,
-                    dayContentColor = Color.White,
-                    disabledDayContentColor = Color.White.copy(alpha = 0.2f),
-                    selectedDayContentColor = Color.Black,
-                    selectedDayContainerColor = AccentCyan,
-                    todayContentColor = AccentCyan,
-                    todayDateBorderColor = AccentCyan,
-                    dayInSelectionRangeContentColor = Color.White,
-                    dayInSelectionRangeContainerColor = AccentCyan.copy(alpha = 0.2f)
-                )
-            )
+            Text(label, color = if (selected) AccentCyan else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(range, color = Color.White.copy(alpha = 0.5f), fontSize = 9.sp, maxLines = 1)
         }
     }
 }
+
+@Composable
+fun UsageChart(
+    records: List<AnalyticsManager.DayRecord>,
+    accentColor: Color
+) {
+    val maxTime = (records.maxOfOrNull { it.screenTimeSecs } ?: 1L).coerceAtLeast(1L)
+    
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(GlassBg)
+            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Daily Activity", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Max: ${maxTime / 60}m",
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 11.sp
+                )
+            }
+            
+            Spacer(Modifier.height(12.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxSize().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                val displayRecords = records.takeLast(20) // Consistent count
+                displayRecords.forEach { record ->
+                    val barHeight = (record.screenTimeSecs.toFloat() / maxTime.toFloat()).coerceIn(0.05f, 1f)
+                    
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight(barHeight)
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(accentColor, accentColor.copy(alpha = 0.3f))
+                                    )
+                                )
+                        )
+                    }
+                }
+            }
+        }
+        
+        // Bottom labels (first and last date in view)
+        val displayRecords = records.takeLast(20)
+        if (displayRecords.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(displayRecords.first().displayLabel, color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp)
+                Text(displayRecords.last().displayLabel, color = Color.White.copy(alpha = 0.3f), fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun DateRangeSelectionDialog(
+    initialStartDate: Date,
+    initialEndDate: Date,
+    onDismiss: () -> Unit,
+    onRangeSelected: (Date, Date) -> Unit
+) {
+    var startDay by remember { mutableStateOf(initialStartDate.dayOf()) }
+    var startMonth by remember { mutableStateOf(initialStartDate.month()) }
+    var startYear by remember { mutableStateOf(initialStartDate.year()) }
+
+    var endDay by remember { mutableStateOf(initialEndDate.dayOf()) }
+    var endMonth by remember { mutableStateOf(initialEndDate.month()) }
+    var endYear by remember { mutableStateOf(initialEndDate.year()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Date Range", color = Color.White) },
+        containerColor = Color(0xFF1A1F2B),
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Start Date", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                DateSelector(startDay, startMonth, startYear) { d, m, y ->
+                    startDay = d; startMonth = m; startYear = y
+                }
+                
+                Divider(color = Color.White.copy(alpha = 0.1f))
+                
+                Text("End Date", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                DateSelector(endDay, endMonth, endYear) { d, m, y ->
+                    endDay = d; endMonth = m; endYear = y
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val start = createDate(startDay, startMonth, startYear)
+                val end = createDate(endDay, endMonth, endYear)
+                onRangeSelected(start, end)
+            }) {
+                Text("Apply", color = AccentCyan)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+            }
+        }
+    )
+}
+
+@Composable
+fun DateSelector(day: Int, month: Int, year: Int, onUpdate: (Int, Int, Int) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NumberPicker(value = day, range = 1..31, label = "DD", modifier = Modifier.weight(1f)) { onUpdate(it, month, year) }
+        NumberPicker(value = month + 1, range = 1..12, label = "MM", modifier = Modifier.weight(1f)) { onUpdate(day, it - 1, year) }
+        NumberPicker(value = year, range = 2024..2030, label = "YYYY", modifier = Modifier.weight(1.5f)) { onUpdate(day, month, it) }
+    }
+}
+
+@Composable
+fun NumberPicker(value: Int, range: IntRange, label: String, modifier: Modifier = Modifier, onValueChange: (Int) -> Unit) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.05f))
+                .padding(vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { if (value > range.first) onValueChange(value - 1) }, modifier = Modifier.size(24.dp)) {
+                    Text("-", color = Color.White, fontSize = 18.sp)
+                }
+                Text(value.toString(), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp))
+                IconButton(onClick = { if (value < range.last) onValueChange(value + 1) }, modifier = Modifier.size(24.dp)) {
+                    Text("+", color = Color.White, fontSize = 18.sp)
+                }
+            }
+        }
+    }
+}
+
+// Helpers for Date manipulation
+fun Date.dayOf(): Int = Calendar.getInstance().apply { time = this@dayOf }.get(Calendar.DAY_OF_MONTH)
+fun Date.month(): Int = Calendar.getInstance().apply { time = this@month }.get(Calendar.MONTH)
+fun Date.year(): Int = Calendar.getInstance().apply { time = this@year }.get(Calendar.YEAR)
+fun createDate(day: Int, month: Int, year: Int): Date = Calendar.getInstance().apply {
+    set(Calendar.YEAR, year)
+    set(Calendar.MONTH, month)
+    set(Calendar.DAY_OF_MONTH, day)
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.time
 
 @Composable
 private fun TodayCard(screenTimeSecs: Long, violations: Int) {

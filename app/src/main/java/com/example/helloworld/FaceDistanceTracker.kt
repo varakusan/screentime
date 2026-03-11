@@ -28,16 +28,9 @@ import kotlin.math.sqrt
  */
 class FaceDistanceTracker(
     private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
     private val screenTimeManager: ScreenTimeManager
 ) {
-
-    // ── Self-managed lifecycle ────────────────────────────────────
-    // We do NOT rely on the service's LifecycleOwner so the camera
-    // cannot be accidentally stopped by activity destruction.
-    private val cameraLifecycleOwner = object : LifecycleOwner {
-        val registry = LifecycleRegistry(this)
-        override val lifecycle: Lifecycle get() = registry
-    }
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -60,10 +53,13 @@ class FaceDistanceTracker(
     private val VIOLATION_INTERVAL_MS = 10_000L
 
     private var isRunning = false
+    @Volatile
+    private var shouldBeRunning = false
 
     // ── Public API ────────────────────────────────────────────────
 
     fun start() {
+        shouldBeRunning = true
         if (isRunning) {
             Log.i(TAG, "Already running, skipping start.")
             return
@@ -74,38 +70,29 @@ class FaceDistanceTracker(
             cameraExecutor = Executors.newSingleThreadExecutor()
         }
 
-        // Move our lifecycle to STARTED — CameraX will bind to this
-        ContextCompat.getMainExecutor(context).execute {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
             try {
-                if (cameraLifecycleOwner.registry.currentState == Lifecycle.State.DESTROYED) {
-                    // Cannot restart a destroyed lifecycle; app needs to be restarted
-                    Log.w(TAG, "Lifecycle already destroyed, cannot restart.")
-                    return@execute
+                cameraProvider = cameraProviderFuture.get()
+                if (!shouldBeRunning) {
+                    Log.i(TAG, "Tracker was stopped during initialization, aborting camera bind.")
+                    return@addListener
                 }
-                cameraLifecycleOwner.registry.currentState = Lifecycle.State.STARTED
+                bindAnalysis()
+                isRunning = true
+                SettingsState.update { it.copy(trackerActive = true) }
+                Log.i(TAG, "Camera bound successfully.")
             } catch (e: Exception) {
-                Log.e(TAG, "Could not set lifecycle to STARTED", e)
-                return@execute
+                Log.e(TAG, "Camera initialization failed", e)
+                SettingsState.update { it.copy(trackerActive = false) }
             }
-
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-            cameraProviderFuture.addListener({
-                try {
-                    cameraProvider = cameraProviderFuture.get()
-                    bindAnalysis()
-                    isRunning = true
-                    SettingsState.update { it.copy(trackerActive = true) }
-                    Log.i(TAG, "Camera bound successfully.")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Camera initialization failed", e)
-                    SettingsState.update { it.copy(trackerActive = false) }
-                }
-            }, ContextCompat.getMainExecutor(context))
-        }
+        }, ContextCompat.getMainExecutor(context))
     }
 
     /** Pauses tracking (e.g., screen off). Camera stays bound so restart is instant. */
     fun stop() {
+        shouldBeRunning = false
+        if (!isRunning) return
         try {
             cameraProvider?.unbindAll()
         } catch (e: Exception) {
@@ -123,14 +110,6 @@ class FaceDistanceTracker(
         } catch (e: Exception) {
             Log.w(TAG, "Unbind on destroy: ${e.message}")
         }
-        try {
-            // Destroy our self-managed lifecycle so CameraX fully releases resources
-            ContextCompat.getMainExecutor(context).execute {
-                try {
-                    cameraLifecycleOwner.registry.currentState = Lifecycle.State.DESTROYED
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
         isRunning = false
         if (!cameraExecutor.isShutdown) cameraExecutor.shutdown()
         try { detector.close() } catch (_: Exception) {}
@@ -192,7 +171,7 @@ class FaceDistanceTracker(
         try {
             cameraProvider?.unbindAll()
             cameraProvider?.bindToLifecycle(
-                cameraLifecycleOwner,          // ← our self-managed lifecycle
+                lifecycleOwner,          // ← Use the passed service lifecycle
                 CameraSelector.DEFAULT_FRONT_CAMERA,
                 imageAnalysis
             )

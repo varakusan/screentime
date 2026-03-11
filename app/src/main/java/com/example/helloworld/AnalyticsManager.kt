@@ -159,24 +159,32 @@ class AnalyticsManager(context: Context) {
         }
     }
 
-    /** Returns aggregated stats for an arbitrary date range (inclusive). */
-    fun getRecordsForRange(startDate: Date, endDate: Date): PeriodAggregate {
+    /** Returns daily records for an arbitrary date range (inclusive). */
+    fun getDailyRecordsForRange(startDate: Date, endDate: Date): List<DayRecord> {
         val cal = Calendar.getInstance()
         cal.time = startDate
         
+        val records = mutableListOf<DayRecord>()
+        
+        if (startDate.after(endDate)) return emptyList()
+
+        while (!cal.time.after(endDate)) {
+            val dayDate = dateFormat.format(cal.time)
+            records.add(getRecord(dayDate))
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return records
+    }
+
+    /** Returns aggregated stats for an arbitrary date range (inclusive). */
+    fun getRecordsForRange(startDate: Date, endDate: Date): PeriodAggregate {
+        val records = getDailyRecordsForRange(startDate, endDate)
         var totalSecs = 0L
         var totalViolations = 0
         
-        // Ensure we don't loop forever if dates are swapped
-        if (startDate.after(endDate)) return PeriodAggregate("Custom Range", 0, 0)
-
-        // Iterate through each day until we pass the end date
-        while (!cal.time.after(endDate)) {
-            val dayDate = dateFormat.format(cal.time)
-            val record = getRecord(dayDate)
-            totalSecs += record.screenTimeSecs
-            totalViolations += record.distanceViolations
-            cal.add(Calendar.DAY_OF_YEAR, 1)
+        records.forEach {
+            totalSecs += it.screenTimeSecs
+            totalViolations += it.distanceViolations
         }
         
         val rangeLabel = "${SimpleDateFormat("MMM d", Locale.getDefault()).format(startDate)} - ${SimpleDateFormat("MMM d", Locale.getDefault()).format(endDate)}"

@@ -27,17 +27,6 @@ class SettingsViewModel : ViewModel() {
         ScreenTimeManager(context).saveShowScreenTime(show)
     }
 
-    fun setDimScreenBasedOnTime(dim: Boolean, context: android.content.Context) {
-        SettingsState.update { it.copy(dimScreenBasedOnTime = dim) }
-        ScreenTimeManager(context).saveDimScreenBasedOnTime(dim)
-    }
-
-    fun setMinBrightnessPercentage(percent: Int, context: android.content.Context) {
-        val capped = percent.coerceIn(30, 100)
-        SettingsState.update { it.copy(minBrightnessPercentage = capped) }
-        ScreenTimeManager(context).saveMinBrightnessPercentage(capped)
-    }
-
     fun setWindowTransparency(alpha: Float, context: android.content.Context) {
         val a = alpha.coerceIn(0f, 1f)
         SettingsState.update { it.copy(windowTransparency = a) }

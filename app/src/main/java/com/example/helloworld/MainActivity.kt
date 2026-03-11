@@ -352,30 +352,6 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // DIM SCREEN OVER TIME TOGGLE
-                    SettingsToggleRow(
-                        icon = Icons.Filled.BrightnessLow,
-                        label = "Dim Screen over time",
-                        checked = settings.dimScreenBasedOnTime,
-                        accentColor = settings.fontColor,
-                        onCheckedChange = { vm.setDimScreenBasedOnTime(it, activity) }
-                    )
-
-                    GlassDivider()
-
-                    // MINIMUM BRIGHTNESS (%) SLIDER
-                    SettingsSliderRow(
-                        icon = Icons.Filled.BrightnessAuto,
-                        label = "Minimum Brightness (%)",
-                        value = (settings.minBrightnessPercentage - 30f) / 70f, // 0..1 for 30..100
-                        accentColor = settings.fontColor,
-                        onValueChange = { norm ->
-                            val percent = (norm * 70f + 30f).toInt()
-                            vm.setMinBrightnessPercentage(percent, activity)
-                        }
-                    )
-                    GlassDivider()
-
                     // 5. DISTANCE TARGET (0-100 cm)
                     SettingsSliderRow(
                         icon = Icons.Filled.Straighten,

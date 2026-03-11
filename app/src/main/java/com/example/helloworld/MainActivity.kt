@@ -39,6 +39,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.BrightnessLow
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.BarChart
@@ -77,6 +79,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -308,7 +313,7 @@ fun SettingsScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Main Settings Card
-            GlassCard {
+            GlassCard(onClick = { showColorPicker = true }) {
                 Column(
                     modifier = Modifier.padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -338,26 +343,50 @@ fun SettingsScreen(
 
                     GlassDivider()
 
-                    // 3. TRANSPARENCY SLIDER
-                    SettingsSliderRow(
-                        icon = Icons.Filled.Opacity,
-                        label = "Transparency",
-                        value = 1f - settings.windowTransparency,
+                    // SHOW DISTANCE DATA TOGGLE
+                    SettingsToggleRow(
+                        icon = Icons.Filled.Straighten,
+                        label = "Show Distance (D)",
+                        checked = settings.showLiveDistance,
                         accentColor = settings.fontColor,
-                        onValueChange = { vm.setWindowTransparency(1f - it, activity) }
+                        onCheckedChange = { vm.setShowLiveDistance(it, activity) }
                     )
 
                     GlassDivider()
 
-                    // 4. WINDOW TINT SLIDER
-                    SettingsSliderRow(
-                        icon = Icons.Filled.Palette,
-                        label = "Window Tint",
-                        value = settings.windowTintHue / 360f,
+                    // SHOW SCREEN TIME DATA TOGGLE
+                    SettingsToggleRow(
+                        icon = Icons.Filled.AccessTime,
+                        label = "Show Screen Time (T)",
+                        checked = settings.showScreenTime,
                         accentColor = settings.fontColor,
-                        onValueChange = { vm.setWindowTintHue(it * 360f, activity) }
+                        onCheckedChange = { vm.setShowScreenTime(it, activity) }
                     )
 
+                    GlassDivider()
+
+                    // DIM SCREEN OVER TIME TOGGLE
+                    SettingsToggleRow(
+                        icon = Icons.Filled.BrightnessLow,
+                        label = "Dim Screen over time",
+                        checked = settings.dimScreenBasedOnTime,
+                        accentColor = settings.fontColor,
+                        onCheckedChange = { vm.setDimScreenBasedOnTime(it, activity) }
+                    )
+
+                    GlassDivider()
+
+                    // MINIMUM BRIGHTNESS (%) SLIDER
+                    SettingsSliderRow(
+                        icon = Icons.Filled.BrightnessAuto,
+                        label = "Minimum Brightness (%)",
+                        value = (settings.minBrightnessPercentage - 30f) / 70f, // 0..1 for 30..100
+                        accentColor = settings.fontColor,
+                        onValueChange = { norm ->
+                            val percent = (norm * 70f + 30f).toInt()
+                            vm.setMinBrightnessPercentage(percent, activity)
+                        }
+                    )
                     GlassDivider()
 
                     // 5. DISTANCE TARGET (0-100 cm)
@@ -629,19 +658,6 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("History", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
-
-                        // Clickable Color Title
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { showColorPicker = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            ColorWheelWithPlus(modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Color", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
                     }
                 } // end else
             } // end Column
@@ -657,9 +673,12 @@ fun SettingsScreen(
 
         if (showColorPicker) {
             val initialColor = remember { settings.fontColor }
+            val initialAlpha = remember { settings.windowTransparency }
             EditColorsDialog(
                 initialColor = initialColor,
+                initialAlpha = initialAlpha,
                 onColorChange = { vm.setFontColor(it, activity) },
+                onAlphaChange = { vm.setWindowTransparency(it, activity) },
                 onColorSelected = { 
                     vm.setFontColor(it, activity)
                     val newCustom = (listOf(it) + settings.customColors).distinct().take(14)
@@ -668,6 +687,7 @@ fun SettingsScreen(
                 },
                 onDismiss = { 
                     vm.setFontColor(initialColor, activity)
+                    vm.setWindowTransparency(initialAlpha, activity)
                     showColorPicker = false 
                 }
             )
@@ -691,12 +711,14 @@ fun SettingsScreen(
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-fun GlassCard(content: @Composable () -> Unit) {
+fun GlassCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+    val settings by SettingsState.state.collectAsState()
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(GlassBg)
+            .background(GlassBg.copy(alpha = settings.windowTransparency.coerceIn(0.05f, 0.95f)))
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .border(
                 width = 1.dp,
                 brush = Brush.verticalGradient(
@@ -739,7 +761,9 @@ fun GlassDivider() {
 @Composable
 fun EditColorsDialog(
     initialColor: Color,
+    initialAlpha: Float,
     onColorChange: (Color) -> Unit,
+    onAlphaChange: (Float) -> Unit,
     onColorSelected: (Color) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -802,6 +826,30 @@ fun EditColorsDialog(
                         )
                     }
                     
+                    // Alpha Slider
+                    Column(
+                        modifier = Modifier.width(30.dp).fillMaxHeight(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .width(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color.White, Color.Transparent)
+                                    )
+                                )
+                                .pointerInput(Unit) {
+                                    detectDragGestures { change, _ ->
+                                        val y = change.position.y.coerceIn(0f, size.height.toFloat())
+                                        onAlphaChange(1f - (y / size.height))
+                                    }
+                                }
+                        )
+                    }
+
                     // Luminosity Slider
                     Column(
                         modifier = Modifier.width(30.dp).fillMaxHeight(),

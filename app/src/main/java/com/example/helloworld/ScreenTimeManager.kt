@@ -27,6 +27,10 @@ class ScreenTimeManager(context: Context) {
         private const val KEY_FONT_COLOR = "font_color"
         private const val KEY_WINDOW_SHAPE = "window_shape"
         private const val KEY_DISTANCE_VIOLATIONS = "distance_violations_today"
+        private const val KEY_SHOW_LIVE_DISTANCE = "show_live_distance"
+        private const val KEY_SHOW_SCREEN_TIME = "show_screen_time"
+        private const val KEY_DIM_SCREEN_BASED_ON_TIME = "dim_screen_based_on_time"
+        private const val KEY_MIN_BRIGHTNESS_PERCENTAGE = "min_brightness_percentage"
     }
 
     init {
@@ -48,6 +52,10 @@ class ScreenTimeManager(context: Context) {
         val savedHue = prefs.getFloat(KEY_WINDOW_TINT_HUE, 200f)
         val savedFontColorLong = prefs.getLong(KEY_FONT_COLOR, 0xFFFFFFFF) // White
         val savedShape = prefs.getString(KEY_WINDOW_SHAPE, SettingsState.WindowShape.Rounded.name)
+        val savedShowLiveDistance = prefs.getBoolean(KEY_SHOW_LIVE_DISTANCE, true)
+        val savedShowScreenTime = prefs.getBoolean(KEY_SHOW_SCREEN_TIME, true)
+        val savedDimScreen = prefs.getBoolean(KEY_DIM_SCREEN_BASED_ON_TIME, false)
+        val savedMinBrightness = prefs.getInt(KEY_MIN_BRIGHTNESS_PERCENTAGE, 30)
         
         SettingsState.update { 
             it.copy(
@@ -59,7 +67,11 @@ class ScreenTimeManager(context: Context) {
                 windowTintHue = savedHue,
                 fontColor = Color(savedFontColorLong.toInt()),
                 windowShape = if (savedShape == SettingsState.WindowShape.Rectangle.name) 
-                    SettingsState.WindowShape.Rectangle else SettingsState.WindowShape.Rounded
+                    SettingsState.WindowShape.Rectangle else SettingsState.WindowShape.Rounded,
+                showLiveDistance = savedShowLiveDistance,
+                showScreenTime = savedShowScreenTime,
+                dimScreenBasedOnTime = savedDimScreen,
+                minBrightnessPercentage = savedMinBrightness
             ) 
         }
     }
@@ -93,6 +105,22 @@ class ScreenTimeManager(context: Context) {
         prefs.edit().putString(KEY_WINDOW_SHAPE, shape.name).apply()
     }
 
+    fun saveShowLiveDistance(show: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_LIVE_DISTANCE, show).apply()
+    }
+
+    fun saveShowScreenTime(show: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_SCREEN_TIME, show).apply()
+    }
+
+    fun saveDimScreenBasedOnTime(dim: Boolean) {
+        prefs.edit().putBoolean(KEY_DIM_SCREEN_BASED_ON_TIME, dim).apply()
+    }
+
+    fun saveMinBrightnessPercentage(percent: Int) {
+        prefs.edit().putInt(KEY_MIN_BRIGHTNESS_PERCENTAGE, percent).apply()
+    }
+
     fun startTracking() {
         if (trackingJob != null) return
         trackingJob = scope.launch {
@@ -110,6 +138,7 @@ class ScreenTimeManager(context: Context) {
     }
 
     fun stopTracking() {
+        if (trackingJob == null) return
         trackingJob?.cancel()
         trackingJob = null
         saveToDisk()

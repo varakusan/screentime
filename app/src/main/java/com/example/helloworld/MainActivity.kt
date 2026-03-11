@@ -324,24 +324,11 @@ fun SettingsScreen(
                         // 1. OVERLAY TOGGLE
                     SettingsToggleRow(
                         icon = Icons.Filled.Layers,
-                        label = "Overlay Window",
+                        label = "Overlay",
                         checked = settings.overlayEnabled,
                         accentColor = settings.fontColor,
                         onCheckedChange = { onOverlayToggle(it) }
                     )
-
-                    GlassDivider()
-
-                    // 2. LIVE FEED TOGGLE
-                    SettingsToggleRow(
-                        icon = Icons.Filled.LiveTv,
-                        label = "Live Feed",
-                        checked = settings.liveFeedEnabled,
-                        accentColor = settings.fontColor,
-                        onCheckedChange = { vm.setLiveFeedEnabled(it) }
-                    )
-
-                    GlassDivider()
 
                     // SHOW DISTANCE DATA TOGGLE
                     SettingsToggleRow(
@@ -665,7 +652,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Screen Overlay v1.0",
+                text = "Safeye v1.0",
                 color = Color.White.copy(alpha = 0.2f),
                 fontSize = 10.sp
             )

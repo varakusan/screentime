@@ -16,7 +16,6 @@ object SettingsState {
     
     data class Settings(
         val overlayEnabled: Boolean = false,
-        val liveFeedEnabled: Boolean = true,
         val showLiveDistance: Boolean = true,
         val showScreenTime: Boolean = true,
         val windowTransparency: Float = 0.7f,    // 0f..1f  (alpha)

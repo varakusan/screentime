@@ -475,7 +475,7 @@ class OverlayService : LifecycleService() {
                             label.text = ""
                             label.visibility = View.GONE
                         } else {
-                            label.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
+                            label.visibility = View.VISIBLE
                             
                             // Calculate progress toward target
                             val targetTotalSeconds = (s.targetTimeHours * 3600L) + (s.targetTimeMinutes * 60L)
@@ -525,7 +525,7 @@ class OverlayService : LifecycleService() {
                         }
                     }
                 
-                statusDot?.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
+                statusDot?.visibility = if (s.showLiveDistance || s.showScreenTime) View.VISIBLE else View.GONE
 
                 // Apply layout changes
                 try { windowManager.updateViewLayout(container, layoutParams) } catch (_: Exception) {}

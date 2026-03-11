@@ -16,9 +16,6 @@ class SettingsViewModel : ViewModel() {
         SettingsState.update { it.copy(overlayEnabled = enabled) }
     }
 
-    fun setLiveFeedEnabled(enabled: Boolean) {
-        SettingsState.update { it.copy(liveFeedEnabled = enabled) }
-    }
 
     fun setShowLiveDistance(show: Boolean, context: android.content.Context) {
         SettingsState.update { it.copy(showLiveDistance = show) }

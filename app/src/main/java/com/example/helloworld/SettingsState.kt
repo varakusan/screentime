@@ -16,7 +16,6 @@ object SettingsState {
     
     data class Settings(
         val overlayEnabled: Boolean = false,
-        val liveFeedEnabled: Boolean = true,
         val showLiveDistance: Boolean = true,
         val showScreenTime: Boolean = true,
         val windowTransparency: Float = 0.7f,    // 0f..1f  (alpha)
@@ -27,8 +26,6 @@ object SettingsState {
         val distanceTargetCm: Int = 25,          // User-set distance target
         val liveDistanceCm: Float = -1f,         // Live measured distance (-1 = unavailable)
         val trackerActive: Boolean = false,      // Whether the distance tracker is running
-        val dimScreenBasedOnTime: Boolean = false,
-        val minBrightnessPercentage: Int = 30,
         val timeHours: Int = 0,
         val timeMinutes: Int = 30,
         val accumulatedSeconds: Long = 0,

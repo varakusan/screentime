@@ -324,24 +324,11 @@ fun SettingsScreen(
                         // 1. OVERLAY TOGGLE
                     SettingsToggleRow(
                         icon = Icons.Filled.Layers,
-                        label = "Overlay Window",
+                        label = "Overlay",
                         checked = settings.overlayEnabled,
                         accentColor = settings.fontColor,
                         onCheckedChange = { onOverlayToggle(it) }
                     )
-
-                    GlassDivider()
-
-                    // 2. LIVE FEED TOGGLE
-                    SettingsToggleRow(
-                        icon = Icons.Filled.LiveTv,
-                        label = "Live Feed",
-                        checked = settings.liveFeedEnabled,
-                        accentColor = settings.fontColor,
-                        onCheckedChange = { vm.setLiveFeedEnabled(it) }
-                    )
-
-                    GlassDivider()
 
                     // SHOW DISTANCE DATA TOGGLE
                     SettingsToggleRow(
@@ -363,30 +350,6 @@ fun SettingsScreen(
                         onCheckedChange = { vm.setShowScreenTime(it, activity) }
                     )
 
-                    GlassDivider()
-
-                    // DIM SCREEN OVER TIME TOGGLE
-                    SettingsToggleRow(
-                        icon = Icons.Filled.BrightnessLow,
-                        label = "Dim Screen over time",
-                        checked = settings.dimScreenBasedOnTime,
-                        accentColor = settings.fontColor,
-                        onCheckedChange = { vm.setDimScreenBasedOnTime(it, activity) }
-                    )
-
-                    GlassDivider()
-
-                    // MINIMUM BRIGHTNESS (%) SLIDER
-                    SettingsSliderRow(
-                        icon = Icons.Filled.BrightnessAuto,
-                        label = "Minimum Brightness (%)",
-                        value = (settings.minBrightnessPercentage - 30f) / 70f, // 0..1 for 30..100
-                        accentColor = settings.fontColor,
-                        onValueChange = { norm ->
-                            val percent = (norm * 70f + 30f).toInt()
-                            vm.setMinBrightnessPercentage(percent, activity)
-                        }
-                    )
                     GlassDivider()
 
                     // 5. DISTANCE TARGET (0-100 cm)
@@ -665,7 +628,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Screen Overlay v1.0",
+                text = "Safeye v1.0",
                 color = Color.White.copy(alpha = 0.2f),
                 fontSize = 10.sp
             )

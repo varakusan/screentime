@@ -16,9 +16,6 @@ class SettingsViewModel : ViewModel() {
         SettingsState.update { it.copy(overlayEnabled = enabled) }
     }
 
-    fun setLiveFeedEnabled(enabled: Boolean) {
-        SettingsState.update { it.copy(liveFeedEnabled = enabled) }
-    }
 
     fun setShowLiveDistance(show: Boolean, context: android.content.Context) {
         SettingsState.update { it.copy(showLiveDistance = show) }
@@ -28,17 +25,6 @@ class SettingsViewModel : ViewModel() {
     fun setShowScreenTime(show: Boolean, context: android.content.Context) {
         SettingsState.update { it.copy(showScreenTime = show) }
         ScreenTimeManager(context).saveShowScreenTime(show)
-    }
-
-    fun setDimScreenBasedOnTime(dim: Boolean, context: android.content.Context) {
-        SettingsState.update { it.copy(dimScreenBasedOnTime = dim) }
-        ScreenTimeManager(context).saveDimScreenBasedOnTime(dim)
-    }
-
-    fun setMinBrightnessPercentage(percent: Int, context: android.content.Context) {
-        val capped = percent.coerceIn(30, 100)
-        SettingsState.update { it.copy(minBrightnessPercentage = capped) }
-        ScreenTimeManager(context).saveMinBrightnessPercentage(capped)
     }
 
     fun setWindowTransparency(alpha: Float, context: android.content.Context) {

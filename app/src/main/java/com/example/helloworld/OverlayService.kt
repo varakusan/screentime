@@ -45,7 +45,6 @@ class OverlayService : LifecycleService() {
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
-    private var dimOverlayView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     // Screen Time
     private lateinit var screenTimeManager: ScreenTimeManager
@@ -104,7 +103,6 @@ class OverlayService : LifecycleService() {
         updateForegroundServiceType(SettingsState.state.value.showLiveDistance)
         try {
             createOverlayView()
-            createDimOverlayView()
         } catch (e: Exception) {
             // Permission might be revoked or window token invalid
             SettingsState.update { it.copy(overlayEnabled = false) }
@@ -179,12 +177,6 @@ class OverlayService : LifecycleService() {
             overlayView = null
         }
         
-        if (dimOverlayView != null) {
-            try {
-                windowManager.removeView(dimOverlayView)
-            } catch (_: Exception) {}
-            dimOverlayView = null
-        }
         serviceScope.cancel()
     }
 
@@ -336,30 +328,6 @@ class OverlayService : LifecycleService() {
         startPulse()
     }
 
-    private fun createDimOverlayView() {
-        if (dimOverlayView != null) return
-
-        dimOverlayView = FrameLayout(this).apply {
-            setBackgroundColor(android.graphics.Color.BLACK)
-            visibility = View.GONE
-        }
-
-        val dimParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        )
-
-        windowManager.addView(dimOverlayView, dimParams)
-    }
 
     private fun startPulse() {
         statusDot?.let { dot ->
@@ -388,8 +356,6 @@ class OverlayService : LifecycleService() {
                     if (s.showScreenTime) screenTimeManager.startTracking() else screenTimeManager.stopTracking()
                     if (s.showLiveDistance) faceDistanceTracker.start() else faceDistanceTracker.stop()
                 }
-
-                updateDimOverlay(s)
 
                 overlayView ?: return@collect
                 
@@ -475,7 +441,7 @@ class OverlayService : LifecycleService() {
                             label.text = ""
                             label.visibility = View.GONE
                         } else {
-                            label.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
+                            label.visibility = View.VISIBLE
                             
                             // Calculate progress toward target
                             val targetTotalSeconds = (s.targetTimeHours * 3600L) + (s.targetTimeMinutes * 60L)
@@ -525,7 +491,7 @@ class OverlayService : LifecycleService() {
                         }
                     }
                 
-                statusDot?.visibility = if (s.liveFeedEnabled) View.VISIBLE else View.GONE
+                statusDot?.visibility = if (s.showLiveDistance || s.showScreenTime) View.VISIBLE else View.GONE
 
                 // Apply layout changes
                 try { windowManager.updateViewLayout(container, layoutParams) } catch (_: Exception) {}
@@ -533,60 +499,6 @@ class OverlayService : LifecycleService() {
         }
     }
 
-    private fun updateDimOverlay(s: SettingsState.Settings) {
-        val dimView = dimOverlayView ?: return
-
-        if (!s.dimScreenBasedOnTime || !isScreenOn) {
-            dimView.visibility = View.GONE
-            return
-        }
-
-        val targetSeconds = (s.targetTimeHours * 3600) + (s.targetTimeMinutes * 60)
-        if (targetSeconds <= 0) {
-            dimView.visibility = View.GONE
-            return
-        }
-
-        // Progress: 0f to 1.0f+
-        val progress = s.accumulatedSeconds.toFloat() / targetSeconds.toFloat()
-        
-        // Start dimming halfway to the target time (50%)
-        val startDimProgress = 0.5f 
-        
-        if (progress <= startDimProgress) {
-            dimView.alpha = 0f
-            dimView.visibility = View.GONE
-            return
-        }
-
-        // Calculate mapped progress (0 to 1) between 50% and 100% of the target time
-        val mappedProgress = ((progress - startDimProgress) / (1f - startDimProgress)).coerceIn(0f, 1f)
-
-        // Find current physical hardware brightness 
-        var currentBrightnessSetting = 255
-        try {
-            currentBrightnessSetting = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS)
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not read brightness", e)
-        }
-        
-        // As a percentage between 0 and 1
-        val currentBrightnessPct = (currentBrightnessSetting / 255f).coerceIn(0.01f, 1f)
-        val minBrightnessPct = s.minBrightnessPercentage / 100f
-
-        // Let expectedPerceivedBrightness = currentPhysicalBrightness * (1 - overlayAlpha).
-        // Max allowed alpha to avoid going below minBrightness:
-        // maxAlpha = 1.0 - (minBrightnessPct / currentBrightnessPct)
-        var maxAlpha = 1.0f - (minBrightnessPct / currentBrightnessPct)
-        
-        // If they manually set screen brightness *below* the limit, we shouldn't draw the overlay at all.
-        maxAlpha = maxAlpha.coerceIn(0f, 1f)
-
-        val currentAlpha = maxAlpha * mappedProgress
-
-        dimView.alpha = currentAlpha
-        dimView.visibility = View.VISIBLE
-    }
 
     // ── Helpers ───────────────────────────────────────────────────
 
